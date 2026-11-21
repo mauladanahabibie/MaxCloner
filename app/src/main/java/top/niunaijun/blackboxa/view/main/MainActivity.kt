@@ -29,6 +29,7 @@ import com.google.android.material.snackbar.Snackbar
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackboxa.R
 import top.niunaijun.blackboxa.app.AppManager
+import top.niunaijun.blackboxa.data.AppsRepository
 import top.niunaijun.blackboxa.databinding.ActivityMainBinding
 import top.niunaijun.blackboxa.databinding.DialogRenameSpaceBinding
 import top.niunaijun.blackboxa.util.inflate
@@ -45,7 +46,7 @@ class MainActivity : LoadingActivity() {
 
     private lateinit var mViewPagerAdapter: ViewPagerAdapter
     private val fragmentList = mutableListOf<AppsFragment>()
-    private var currentUser = 0
+    private var currentUser = AppsFragment.ALL_USERS_ID
 
     companion object {
         private const val TAG = "MainActivity"
@@ -144,15 +145,18 @@ class MainActivity : LoadingActivity() {
     }
 
     private fun initSpaceControls() {
-        updateUserRemark(currentUser)
+        updateSpaceHeaderState()
         rebuildSpaceChips()
 
         viewBinding.btnRenameSpace.setOnClickListener {
-            showRenameSpaceDialog(currentUser)
+            if (currentUser >= 0) {
+                showRenameSpaceDialog(currentUser)
+            }
         }
     }
 
     private fun showRenameSpaceDialog(userId: Int) {
+        if (userId < 0) return
         val dialogBinding = DialogRenameSpaceBinding.inflate(layoutInflater)
         val currentName = AppManager.getSpaceDisplayName(userId)
         dialogBinding.etSpaceName.setText(currentName)
@@ -170,8 +174,9 @@ class MainActivity : LoadingActivity() {
                         putString("Remark$userId", newName)
                     }
                 }
-                updateUserRemark(currentUser)
+                updateSpaceHeaderState()
                 rebuildSpaceChips()
+                refreshAllFragments()
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -183,6 +188,25 @@ class MainActivity : LoadingActivity() {
         }
     }
 
+    fun refreshAllFragments() {
+        runOnUiThread {
+            supportFragmentManager.fragments
+                .filterIsInstance<AppsFragment>()
+                .forEach { it.refreshApps() }
+            rebuildSpaceChips()
+        }
+    }
+
+    fun switchToAllTabAndRefresh() {
+        runOnUiThread {
+            scanUser()
+            if (fragmentList.isNotEmpty()) {
+                viewBinding.viewPager.setCurrentItem(0, true)
+            }
+            refreshAllFragments()
+        }
+    }
+
     private fun rebuildSpaceChips() {
         if (isFinishing || isDestroyed) return
         val users = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
@@ -191,12 +215,23 @@ class MainActivity : LoadingActivity() {
 
         fragmentList.forEachIndexed { index, fragment ->
             val userId = fragment.userID
-            val isTrailingNewSpace = index == fragmentList.lastIndex &&
-                users.isNotEmpty() &&
-                users.none { it.id == userId }
-
-            val label = if (isTrailingNewSpace) {
-                getString(R.string.new_space)
+            val label = if (userId == AppsFragment.ALL_USERS_ID) {
+                val allLabel = getString(R.string.all_clones_tab)
+                val cachedCount = fragment.getAppCount()
+                val totalCount = if (cachedCount > 0) {
+                    cachedCount
+                } else {
+                    users.sumOf { user ->
+                        runCatching {
+                            BlackBoxCore.get().getInstalledApplications(0, user.id).size
+                        }.getOrDefault(0)
+                    }
+                }
+                if (totalCount > 0) {
+                    getString(R.string.space_chip_with_count, allLabel, totalCount)
+                } else {
+                    allLabel
+                }
             } else {
                 val spaceName = AppManager.getSpaceDisplayName(userId)
                 val cachedCount = fragment.getAppCount()
@@ -250,14 +285,12 @@ class MainActivity : LoadingActivity() {
     private fun initViewPager() {
         val userList = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
         fragmentList.clear()
-        userList.distinctBy { it.id }.forEach { fragmentList.add(AppsFragment.newInstance(it.id)) }
-
-        val nextUserId = (userList.maxOfOrNull { it.id } ?: -1) + 1
-        if (fragmentList.none { it.userID == nextUserId }) {
-            fragmentList.add(AppsFragment.newInstance(nextUserId))
+        fragmentList.add(AppsFragment.newInstance(AppsFragment.ALL_USERS_ID))
+        userList.sortedBy { it.id }.distinctBy { it.id }.forEach {
+            fragmentList.add(AppsFragment.newInstance(it.id))
         }
 
-        currentUser = fragmentList.firstOrNull()?.userID ?: 0
+        currentUser = AppsFragment.ALL_USERS_ID
 
         mViewPagerAdapter = ViewPagerAdapter(this)
         mViewPagerAdapter.replaceData(fragmentList)
@@ -268,8 +301,9 @@ class MainActivity : LoadingActivity() {
                     super.onPageSelected(position)
                     if (position in fragmentList.indices) {
                         currentUser = fragmentList[position].userID
-                        updateUserRemark(currentUser)
+                        updateSpaceHeaderState()
                         rebuildSpaceChips()
+                        invalidateOptionsMenu()
                         showFloatButton(true)
                         val query = viewBinding.etMainSearch.text?.toString().orEmpty()
                         fragmentList[position].setSearchQuery(query)
@@ -300,26 +334,21 @@ class MainActivity : LoadingActivity() {
 
     fun getNextCloneTargetUserId(packageName: String): Int {
         val users = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
-        val availableExisting = users.firstOrNull { user ->
-            user.id != currentUser && !runCatching {
-                BlackBoxCore.get().isInstalled(packageName, user.id)
-            }.getOrDefault(false)
-        }
-        return availableExisting?.id
-            ?: fragmentList.lastOrNull()?.userID
-            ?: ((users.maxOfOrNull { it.id } ?: -1) + 1)
+        val installedUserIds = users
+            .filter { runCatching { BlackBoxCore.get().isInstalled(packageName, it.id) }.getOrDefault(false) }
+            .map { it.id }
+            .toSet()
+        val maxId = users.maxOfOrNull { it.id } ?: -1
+        return AppsRepository.resolveNextFreeUserId(
+            installedUserIdsForPkg = installedUserIds,
+            preferredUserId = if (currentUser >= 0) currentUser else AppsFragment.ALL_USERS_ID,
+            maxExistingUserId = maxId
+        )
     }
 
     fun clonePackageToNextSpace(packageName: String) {
-        val targetUserId = getNextCloneTargetUserId(packageName)
-        if (fragmentList.none { it.userID == targetUserId }) {
-            scanUser()
-        }
-        val targetIndex = fragmentList.indexOfFirst { it.userID == targetUserId }
-        if (targetIndex >= 0) {
-            viewBinding.viewPager.setCurrentItem(targetIndex, true)
-            fragmentList[targetIndex].installApk(packageName)
-        }
+        val pos = viewBinding.viewPager.currentItem.coerceIn(0, fragmentList.lastIndex)
+        fragmentList.getOrNull(pos)?.installApk(packageName)
     }
 
     fun showFloatButton(show: Boolean) {
@@ -332,15 +361,15 @@ class MainActivity : LoadingActivity() {
 
     fun scanUser() {
         try {
-            val userList = BlackBoxCore.get().users
-            val nextUserId = (userList.maxOfOrNull { it.id } ?: -1) + 1
-            val expectedIds = userList.map { it.id } + listOf(nextUserId)
+            val userList = BlackBoxCore.get().users.sortedBy { it.id }
+            val expectedIds = listOf(AppsFragment.ALL_USERS_ID) + userList.map { it.id }.distinct()
 
             val existingIds = fragmentList.map { it.userID }.toSet()
             fragmentList.removeAll { it.userID !in expectedIds }
             expectedIds.filter { it !in existingIds }.forEach { missingId ->
                 fragmentList.add(AppsFragment.newInstance(missingId))
             }
+
             val uniqueFragments = fragmentList.distinctBy { it.userID }
             if (uniqueFragments.size != fragmentList.size) {
                 fragmentList.clear()
@@ -349,21 +378,23 @@ class MainActivity : LoadingActivity() {
             fragmentList.sortBy { it.userID }
 
             if (fragmentList.isEmpty()) {
-                fragmentList.add(AppsFragment.newInstance(0))
+                fragmentList.add(AppsFragment.newInstance(AppsFragment.ALL_USERS_ID))
             }
 
             mViewPagerAdapter.notifyDataSetChanged()
             val pos = viewBinding.viewPager.currentItem.coerceIn(0, fragmentList.lastIndex)
             currentUser = fragmentList[pos].userID
-            updateUserRemark(currentUser)
+            updateSpaceHeaderState()
             rebuildSpaceChips()
+            invalidateOptionsMenu()
         } catch (e: Exception) {
             Log.e(TAG, "Error in scanUser: ${e.message}")
         }
     }
 
-    private fun updateUserRemark(userId: Int) {
+    private fun updateSpaceHeaderState() {
         viewBinding.toolbarLayout.toolbar.subtitle = null
+        viewBinding.btnRenameSpace.visibility = if (currentUser >= 0) View.VISIBLE else View.GONE
     }
 
     private val apkPathResult =
@@ -487,6 +518,18 @@ class MainActivity : LoadingActivity() {
         return true
     }
 
+    override fun onPrepareOptionsMenu(menu: Menu?): Boolean {
+        menu?.findItem(R.id.rename_space)?.isVisible = (currentUser >= 0)
+        menu?.findItem(R.id.stop_all_space)?.setTitle(
+            if (currentUser == AppsFragment.ALL_USERS_ID) {
+                R.string.stop_all_clones
+            } else {
+                R.string.stop_all_in_space
+            }
+        )
+        return super.onPrepareOptionsMenu(menu)
+    }
+
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
         return when (item.itemId) {
             R.id.main_search -> {
@@ -498,8 +541,13 @@ class MainActivity : LoadingActivity() {
                 true
             }
             R.id.fake_location -> {
+                val targetSpace = if (currentUser >= 0) {
+                    currentUser
+                } else {
+                    runCatching { BlackBoxCore.get().users.firstOrNull()?.id }.getOrNull() ?: 0
+                }
                 val intent = Intent(this, FakeManagerActivity::class.java).apply {
-                    putExtra("userID", currentUser)
+                    putExtra("userID", targetSpace)
                 }
                 startActivity(intent)
                 true
@@ -509,7 +557,9 @@ class MainActivity : LoadingActivity() {
                 true
             }
             R.id.rename_space -> {
-                showRenameSpaceDialog(currentUser)
+                if (currentUser >= 0) {
+                    showRenameSpaceDialog(currentUser)
+                }
                 true
             }
             R.id.stop_all_space -> {
@@ -522,20 +572,32 @@ class MainActivity : LoadingActivity() {
 
     private fun stopAllAppsInCurrentSpace() {
         try {
-            val apps = BlackBoxCore.get().getInstalledApplications(0, currentUser)
-            apps.forEach { app ->
-                runCatching { BlackBoxCore.get().stopPackage(app.packageName, currentUser) }
+            val targetUsers = if (currentUser == AppsFragment.ALL_USERS_ID) {
+                BlackBoxCore.get().users.map { it.id }
+            } else {
+                listOf(currentUser)
+            }
+            for (uid in targetUsers) {
+                val apps = BlackBoxCore.get().getInstalledApplications(0, uid)
+                apps.forEach { app ->
+                    runCatching { BlackBoxCore.get().stopPackage(app.packageName, uid) }
+                }
+            }
+            val message = if (currentUser == AppsFragment.ALL_USERS_ID) {
+                getString(R.string.stop_all_clones_done)
+            } else {
+                getString(R.string.stop_all_done, AppManager.getSpaceDisplayName(currentUser))
             }
             Snackbar.make(
                 findViewById(android.R.id.content),
-                getString(R.string.stop_all_done, AppManager.getSpaceDisplayName(currentUser)),
+                message,
                 Snackbar.LENGTH_SHORT
             )
                 .setBackgroundTint(ContextCompat.getColor(this, R.color.mc_surface_card_elevated))
                 .setTextColor(ContextCompat.getColor(this, R.color.mc_text_primary))
                 .show()
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping all apps in space $currentUser: ${e.message}")
+            Log.e(TAG, "Error stopping all apps: ${e.message}")
         }
     }
 }

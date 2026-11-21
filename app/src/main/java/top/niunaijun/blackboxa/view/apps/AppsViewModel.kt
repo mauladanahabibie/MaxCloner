@@ -13,6 +13,8 @@ class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
 
     val appsLiveData = MutableLiveData<List<AppInfo>>()
 
+    val recentAppsLiveData = MutableLiveData<List<AppInfo>>()
+
     val outcomeLiveData = MutableLiveData<InstallOutcome?>()
 
     val launchLiveData = MutableLiveData<Boolean?>()
@@ -21,7 +23,7 @@ class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
 
     fun getInstalledApps(userId: Int) {
         launchOnUI {
-            repo.getVmInstallList(userId, appsLiveData)
+            repo.getVmInstallList(userId, appsLiveData, recentAppsLiveData)
         }
     }
 
@@ -30,7 +32,7 @@ class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
 
         fun attemptLoad() {
             launchOnUI {
-                repo.getVmInstallList(userId, appsLiveData)
+                repo.getVmInstallList(userId, appsLiveData, recentAppsLiveData)
                 val currentApps = appsLiveData.value
                 if ((currentApps == null || currentApps.isEmpty()) && retryCount < maxRetries) {
                     retryCount++

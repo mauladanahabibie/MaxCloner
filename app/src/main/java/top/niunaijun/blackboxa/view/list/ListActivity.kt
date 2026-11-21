@@ -19,6 +19,7 @@ import cbfg.rvadapter.RVAdapter
 import top.niunaijun.blackboxa.R
 import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.bean.InstalledAppBean
+import top.niunaijun.blackboxa.data.AppsRepository
 import top.niunaijun.blackboxa.databinding.ActivityListBinding
 import top.niunaijun.blackboxa.util.InjectionUtil
 import top.niunaijun.blackboxa.util.inflate
@@ -32,16 +33,20 @@ class ListActivity : BaseActivity() {
 
     private var appList: List<InstalledAppBean> = emptyList()
     private var includeSystemApps = false
-    private var userId = 0
+    private var userId = AppsRepository.ALL_USERS_ID
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(viewBinding.root)
         setupEdgeToEdge(viewBinding.headerContainer, viewBinding.recyclerView)
 
-        userId = intent.getIntExtra("userID", 0)
+        userId = intent.getIntExtra("userID", AppsRepository.ALL_USERS_ID)
         initToolbar(viewBinding.toolbarLayout.toolbar, R.string.choose_app, true)
-        viewBinding.toolbarLayout.toolbar.subtitle = AppManager.getSpaceDisplayName(userId)
+        viewBinding.toolbarLayout.toolbar.subtitle = if (userId == AppsRepository.ALL_USERS_ID) {
+            getString(R.string.all_clones_title)
+        } else {
+            AppManager.getSpaceDisplayName(userId)
+        }
 
         mAdapter = RVAdapter<InstalledAppBean>(this, ListAdapter())
             .bind(viewBinding.recyclerView)

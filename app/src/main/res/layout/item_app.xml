@@ -9,23 +9,45 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:background="@drawable/bg_app_card"
-        android:minHeight="132dp"
         android:paddingHorizontal="8dp"
         android:paddingTop="8dp"
-        android:paddingBottom="12dp">
+        android:paddingBottom="10dp">
 
-        <ImageView
-            android:id="@+id/ivPinnedBadge"
-            android:layout_width="22dp"
-            android:layout_height="22dp"
-            android:background="@drawable/bg_pill_success"
-            android:contentDescription="@string/shortcut_already_on_home"
-            android:padding="4dp"
-            android:src="@drawable/ic_home_pin"
-            android:visibility="gone"
+        <LinearLayout
+            android:id="@+id/topBadges"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             app:layout_constraintStart_toStartOf="parent"
-            app:layout_constraintTop_toTopOf="parent"
-            app:tint="@color/mc_success" />
+            app:layout_constraintTop_toTopOf="parent">
+
+            <TextView
+                android:id="@+id/tvCloneBadge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:background="@drawable/bg_pill_muted"
+                android:fontFamily="@font/jetbrains_mono"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="2dp"
+                android:textColor="@color/mc_text_secondary"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+
+            <ImageView
+                android:id="@+id/ivPinnedBadge"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_marginStart="4dp"
+                android:background="@drawable/bg_pill_success"
+                android:contentDescription="@string/shortcut_already_on_home"
+                android:padding="3dp"
+                android:src="@drawable/ic_home_pin"
+                android:visibility="gone"
+                app:tint="@color/mc_success" />
+
+        </LinearLayout>
 
         <ImageView
             android:id="@+id/ivMore"
@@ -41,9 +63,9 @@
 
         <FrameLayout
             android:id="@+id/iconContainer"
-            android:layout_width="56dp"
-            android:layout_height="56dp"
-            android:layout_marginTop="20dp"
+            android:layout_width="54dp"
+            android:layout_height="54dp"
+            android:layout_marginTop="24dp"
             android:background="@drawable/bg_icon_container"
             android:padding="6dp"
             app:layout_constraintEnd_toEndOf="parent"
@@ -76,17 +98,49 @@
             android:id="@+id/name"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="8dp"
             android:ellipsize="end"
             android:fontFamily="@font/inter"
-            android:gravity="center_horizontal|top"
-            android:maxLines="2"
-            android:minLines="2"
+            android:gravity="center"
+            android:maxLines="1"
             android:textColor="@color/mc_text_primary"
             android:textSize="12sp"
+            android:textStyle="bold"
             app:layout_constraintEnd_toEndOf="parent"
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toBottomOf="@id/iconContainer" />
+
+        <LinearLayout
+            android:id="@+id/btnQuickClone"
+            android:layout_width="0dp"
+            android:layout_height="28dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/bg_quick_clone_btn"
+            android:contentDescription="@string/quick_clone_desc"
+            android:gravity="center"
+            android:orientation="horizontal"
+            android:paddingHorizontal="8dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/name">
+
+            <ImageView
+                android:layout_width="13dp"
+                android:layout_height="13dp"
+                android:contentDescription="@null"
+                android:src="@drawable/ic_add"
+                app:tint="@color/mc_on_primary_container" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="4dp"
+                android:text="@string/clone_action"
+                android:textColor="@color/mc_on_primary_container"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+        </LinearLayout>
 
     </androidx.constraintlayout.widget.ConstraintLayout>
 

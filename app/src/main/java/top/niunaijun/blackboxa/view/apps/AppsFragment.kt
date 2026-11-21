@@ -7,10 +7,11 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
+import androidx.core.widget.NestedScrollView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.RecyclerView
+import androidx.recyclerview.widget.LinearLayoutManager
 import cbfg.rvadapter.RVAdapter
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -19,9 +20,9 @@ import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackboxa.R
 import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.bean.AppInfo
+import top.niunaijun.blackboxa.data.AppsRepository
 import top.niunaijun.blackboxa.databinding.FragmentAppsBinding
 import top.niunaijun.blackboxa.databinding.SheetAppActionsBinding
-import top.niunaijun.blackboxa.util.ContextUtil.openAppSystemSettings
 import top.niunaijun.blackboxa.util.InjectionUtil
 import top.niunaijun.blackboxa.util.ShortcutUtil
 import top.niunaijun.blackboxa.util.inflate
@@ -32,18 +33,21 @@ import top.niunaijun.blackboxa.view.main.MainActivity
 class AppsFragment : Fragment() {
 
     val userID: Int
-        get() = arguments?.getInt("userID", 0) ?: 0
+        get() = arguments?.getInt("userID", ALL_USERS_ID) ?: ALL_USERS_ID
 
     private lateinit var viewModel: AppsViewModel
     private lateinit var mAdapter: RVAdapter<AppInfo>
+    private lateinit var recentAdapter: RecentClonesAdapter
     private val viewBinding: FragmentAppsBinding by inflate()
 
     private var fullAppList: List<AppInfo> = emptyList()
+    private var recentList: List<AppInfo> = emptyList()
     private var currentSearchQuery: String = ""
     private var pendingInstallSource: String? = null
 
     companion object {
         private const val TAG = "AppsFragment"
+        const val ALL_USERS_ID = AppsRepository.ALL_USERS_ID
 
         fun newInstance(userID: Int): AppsFragment {
             return AppsFragment().apply {
@@ -62,9 +66,25 @@ class AppsFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        recentAdapter = RecentClonesAdapter(
+            onOpenClick = { app -> launchApp(app) },
+            onQuickCloneClick = { app -> installApk(app.packageName) },
+            onLongClick = { app -> showAppActionsSheet(app) }
+        )
+        viewBinding.rvRecentClones.layoutManager = LinearLayoutManager(
+            requireContext(),
+            LinearLayoutManager.HORIZONTAL,
+            false
+        )
+        viewBinding.rvRecentClones.adapter = recentAdapter
+
         mAdapter = RVAdapter<AppInfo>(
             requireContext(),
-            AppsAdapter(userID) { app -> showAppActionsSheet(app) }
+            AppsAdapter(
+                showCloneBadgeAlways = (userID == ALL_USERS_ID),
+                onMoreClick = { app -> showAppActionsSheet(app) },
+                onQuickCloneClick = { app -> installApk(app.packageName) }
+            )
         ).bind(viewBinding.recyclerView)
 
         val layoutManager = GridLayoutManager(requireContext(), 3).apply {
@@ -75,16 +95,16 @@ class AppsFragment : Fragment() {
         viewBinding.recyclerView.adapter = mAdapter
         viewBinding.recyclerView.setItemViewCacheSize(20)
 
-        viewBinding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                super.onScrolled(recyclerView, dx, dy)
+        viewBinding.scrollContainer.setOnScrollChangeListener(
+            NestedScrollView.OnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                val dy = scrollY - oldScrollY
                 if (dy > 12) {
                     (activity as? MainActivity)?.showFloatButton(false)
                 } else if (dy < -12) {
                     (activity as? MainActivity)?.showFloatButton(true)
                 }
             }
-        })
+        )
 
         mAdapter.setItemClickListener { _, data, _ ->
             launchApp(data)
@@ -132,6 +152,12 @@ class AppsFragment : Fragment() {
 
     fun getAppCount(): Int = fullAppList.size
 
+    fun refreshApps() {
+        if (this::viewModel.isInitialized && isAdded) {
+            viewModel.getInstalledApps(userID)
+        }
+    }
+
     fun setSearchQuery(query: String) {
         currentSearchQuery = query.trim()
         if (this::mAdapter.isInitialized && view != null) {
@@ -152,17 +178,32 @@ class AppsFragment : Fragment() {
             }
         }
 
+        viewModel.recentAppsLiveData.observe(viewLifecycleOwner) { recents ->
+            recentList = recents ?: emptyList()
+            if (this::recentAdapter.isInitialized) {
+                recentAdapter.submitList(recentList)
+            }
+            if (this::mAdapter.isInitialized && view != null) {
+                updateRecentVisibility()
+            }
+        }
+
         viewModel.outcomeLiveData.observe(viewLifecycleOwner) { outcome ->
             if (outcome == null) return@observe
             viewModel.outcomeLiveData.value = null
             hideLoading()
 
-            viewModel.getInstalledApps(userID)
-            (activity as? MainActivity)?.scanUser()
-
             if (outcome.success && outcome.isInstallAction && outcome.packageName != null) {
-                handleSuccessfulClone(outcome.packageName)
+                handleSuccessfulClone(outcome.packageName, outcome.userId)
+                if (this.userID >= 0 && outcome.userId != this.userID) {
+                    (activity as? MainActivity)?.switchToAllTabAndRefresh()
+                } else {
+                    (activity as? MainActivity)?.scanUser()
+                    (activity as? MainActivity)?.refreshAllFragments()
+                }
             } else {
+                (activity as? MainActivity)?.scanUser()
+                (activity as? MainActivity)?.refreshAllFragments()
                 showStatusSnackbar(outcome.message)
             }
         }
@@ -177,16 +218,17 @@ class AppsFragment : Fragment() {
         }
     }
 
-    private fun handleSuccessfulClone(packageName: String) {
+    private fun handleSuccessfulClone(packageName: String, actualUserId: Int) {
         val ctx = context ?: return
-        val appInfo = ShortcutUtil.loadClonedAppInfo(ctx, packageName, userID)
+        val appInfo = ShortcutUtil.loadClonedAppInfo(ctx, packageName, actualUserId)
         if (appInfo == null) {
             showStatusSnackbar(getString(R.string.install_success))
             return
         }
+        val clonedApp = appInfo.copy(userId = actualUserId)
 
         if (AppManager.mBlackBoxLoader.autoPinShortcut()) {
-            val result = ShortcutUtil.requestAutoPinShortcut(ctx, userID, appInfo)
+            val result = ShortcutUtil.requestAutoPinShortcut(ctx, actualUserId, clonedApp)
             if (this::mAdapter.isInitialized) {
                 mAdapter.notifyDataSetChanged()
             }
@@ -198,26 +240,35 @@ class AppsFragment : Fragment() {
                 ShortcutUtil.PinResult.REQUESTED,
                 ShortcutUtil.PinResult.UPDATED -> {
                     showStatusSnackbar(
-                        message = getString(R.string.cloned_ready_msg, appInfo.name),
+                        message = getString(R.string.cloned_ready_msg, clonedApp.name),
                         actionLabel = getString(R.string.open_now)
                     ) {
-                        launchApp(appInfo)
+                        launchApp(clonedApp)
                     }
                 }
             }
         } else {
             showStatusSnackbar(
-                message = getString(R.string.cloned_ready_msg, appInfo.name),
+                message = getString(R.string.cloned_ready_msg, clonedApp.name),
                 actionLabel = getString(R.string.add_to_home_screen)
             ) {
-                when (ShortcutUtil.requestAutoPinShortcut(ctx, userID, appInfo)) {
+                when (ShortcutUtil.requestAutoPinShortcut(ctx, actualUserId, clonedApp)) {
                     ShortcutUtil.PinResult.PERMISSION_REQUIRED,
                     ShortcutUtil.PinResult.UNSUPPORTED -> ShortcutUtil.showShortcutPermissionDialog(ctx)
-                    ShortcutUtil.PinResult.REQUESTED -> toast(getString(R.string.shortcut_sent_toast, appInfo.name))
-                    ShortcutUtil.PinResult.UPDATED -> toast(getString(R.string.shortcut_updated_toast, appInfo.name))
+                    ShortcutUtil.PinResult.REQUESTED -> toast(getString(R.string.shortcut_sent_toast, clonedApp.name))
+                    ShortcutUtil.PinResult.UPDATED -> toast(getString(R.string.shortcut_updated_toast, clonedApp.name))
                 }
             }
         }
+    }
+
+    private fun updateRecentVisibility() {
+        val showRecents = userID == ALL_USERS_ID &&
+            recentList.isNotEmpty() &&
+            currentSearchQuery.isBlank() &&
+            fullAppList.isNotEmpty()
+        viewBinding.recentSectionContainer.visibility = if (showRecents) View.VISIBLE else View.GONE
+        viewBinding.tvAppsSectionHeader.visibility = if (showRecents) View.VISIBLE else View.GONE
     }
 
     private fun applyFilterAndUpdateUi() {
@@ -231,32 +282,38 @@ class AppsFragment : Fragment() {
         }
 
         mAdapter.setItems(filtered)
+        updateRecentVisibility()
 
         when {
             fullAppList.isEmpty() -> {
-                viewBinding.recyclerView.visibility = View.GONE
+                viewBinding.scrollContainer.visibility = View.GONE
                 viewBinding.emptySearchContainer.visibility = View.GONE
                 viewBinding.emptyStateContainer.visibility = View.VISIBLE
-                viewBinding.tvEmptyTitle.text = getString(
-                    R.string.empty_space_title,
-                    AppManager.getSpaceDisplayName(userID)
-                )
+                if (userID == ALL_USERS_ID) {
+                    viewBinding.tvEmptyTitle.setText(R.string.empty_all_title)
+                } else {
+                    viewBinding.tvEmptyTitle.text = getString(
+                        R.string.empty_space_title,
+                        AppManager.getSpaceDisplayName(userID)
+                    )
+                }
             }
             filtered.isEmpty() -> {
-                viewBinding.recyclerView.visibility = View.GONE
+                viewBinding.scrollContainer.visibility = View.GONE
                 viewBinding.emptyStateContainer.visibility = View.GONE
                 viewBinding.emptySearchContainer.visibility = View.VISIBLE
             }
             else -> {
                 viewBinding.emptyStateContainer.visibility = View.GONE
                 viewBinding.emptySearchContainer.visibility = View.GONE
-                viewBinding.recyclerView.visibility = View.VISIBLE
+                viewBinding.scrollContainer.visibility = View.VISIBLE
             }
         }
     }
 
     private fun showAppActionsSheet(info: AppInfo) {
         val ctx = context ?: return
+        val appUserId = info.userId
         val dialog = BottomSheetDialog(ctx)
         val sheetBinding = SheetAppActionsBinding.inflate(layoutInflater)
         dialog.setContentView(sheetBinding.root)
@@ -266,9 +323,9 @@ class AppsFragment : Fragment() {
         )
         sheetBinding.tvSheetAppName.text = info.name
         sheetBinding.tvSheetPackage.text = info.packageName
-        sheetBinding.tvSheetSpace.text = AppManager.getSpaceDisplayName(userID)
+        sheetBinding.tvSheetSpace.text = AppManager.getSpaceDisplayName(appUserId)
 
-        val isPinned = ShortcutUtil.isShortcutPinned(ctx, userID, info.packageName)
+        val isPinned = ShortcutUtil.isShortcutPinned(ctx, appUserId, info.packageName)
         if (isPinned) {
             sheetBinding.tvSheetPinStatus.text = getString(R.string.shortcut_already_on_home)
             sheetBinding.tvSheetPinStatus.setBackgroundResource(R.drawable.bg_pill_success)
@@ -286,7 +343,7 @@ class AppsFragment : Fragment() {
         }
 
         val nextUserId = (activity as? MainActivity)?.getNextCloneTargetUserId(info.packageName)
-            ?: (userID + 1)
+            ?: (appUserId + 1)
         sheetBinding.tvCloneNextSubtitle.text = getString(
             R.string.clone_to_next_space_subtitle,
             AppManager.getSpaceDisplayName(nextUserId)
@@ -294,7 +351,7 @@ class AppsFragment : Fragment() {
 
         sheetBinding.actionAddHome.setOnClickListener {
             dialog.dismiss()
-            ShortcutUtil.showCustomizeShortcutDialog(ctx, userID, info) { result ->
+            ShortcutUtil.showCustomizeShortcutDialog(ctx, appUserId, info) { result ->
                 when (result) {
                     ShortcutUtil.PinResult.PERMISSION_REQUIRED,
                     ShortcutUtil.PinResult.UNSUPPORTED -> ShortcutUtil.showShortcutPermissionDialog(ctx)
@@ -318,7 +375,7 @@ class AppsFragment : Fragment() {
 
         sheetBinding.actionCloneNextSpace.setOnClickListener {
             dialog.dismiss()
-            (activity as? MainActivity)?.clonePackageToNextSpace(info.packageName)
+            installApk(info.packageName)
         }
 
         sheetBinding.actionStop.setOnClickListener {
@@ -346,7 +403,7 @@ class AppsFragment : Fragment() {
     private fun launchApp(info: AppInfo) {
         try {
             showLoading(getString(R.string.opening_app_progress, info.name))
-            viewModel.launchApk(info.packageName, userID)
+            viewModel.launchApk(info.packageName, info.userId)
         } catch (e: Exception) {
             Log.e(TAG, "Error launching app: ${e.message}")
             hideLoading()
@@ -359,7 +416,7 @@ class AppsFragment : Fragment() {
             .setMessage(getString(R.string.uninstall_app_hint, info.name))
             .setPositiveButton(R.string.app_remove) { _, _ ->
                 showLoading(getString(R.string.removing_clone_progress))
-                viewModel.unInstall(info.packageName, userID)
+                viewModel.unInstall(info.packageName, info.userId)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -371,7 +428,7 @@ class AppsFragment : Fragment() {
             .setMessage(getString(R.string.app_stop_hint, info.name))
             .setPositiveButton(R.string.app_stop) { _, _ ->
                 try {
-                    BlackBoxCore.get().stopPackage(info.packageName, userID)
+                    BlackBoxCore.get().stopPackage(info.packageName, info.userId)
                     showStatusSnackbar(getString(R.string.is_stop, info.name))
                 } catch (e: Exception) {
                     Log.e(TAG, "Error stopping app: ${e.message}")
@@ -387,7 +444,7 @@ class AppsFragment : Fragment() {
             .setMessage(getString(R.string.app_clear_hint, info.name))
             .setPositiveButton(R.string.app_clear) { _, _ ->
                 showLoading(getString(R.string.clearing_data_progress))
-                viewModel.clearApkData(info.packageName, userID)
+                viewModel.clearApkData(info.packageName, info.userId)
             }
             .setNegativeButton(R.string.cancel, null)
             .show()

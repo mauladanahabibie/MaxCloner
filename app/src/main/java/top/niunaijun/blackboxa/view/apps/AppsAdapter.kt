@@ -16,8 +16,9 @@ import top.niunaijun.blackboxa.databinding.ItemAppBinding
 import top.niunaijun.blackboxa.util.ShortcutUtil
 
 class AppsAdapter(
-    private val userId: Int,
-    private val onMoreClick: (AppInfo) -> Unit
+    private val showCloneBadgeAlways: Boolean,
+    private val onMoreClick: (AppInfo) -> Unit,
+    private val onQuickCloneClick: (AppInfo) -> Unit
 ) : RVHolderFactory() {
 
     companion object {
@@ -26,13 +27,19 @@ class AppsAdapter(
     }
 
     override fun createViewHolder(parent: ViewGroup?, viewType: Int, item: Any): RVHolder<out Any> {
-        return AppsVH(inflate(R.layout.item_app, parent), userId, onMoreClick)
+        return AppsVH(
+            inflate(R.layout.item_app, parent),
+            showCloneBadgeAlways,
+            onMoreClick,
+            onQuickCloneClick
+        )
     }
 
     class AppsVH(
         itemView: View,
-        private val userId: Int,
-        private val onMoreClick: (AppInfo) -> Unit
+        private val showCloneBadgeAlways: Boolean,
+        private val onMoreClick: (AppInfo) -> Unit,
+        private val onQuickCloneClick: (AppInfo) -> Unit
     ) : RVHolder<AppInfo>(itemView) {
         val binding = ItemAppBinding.bind(itemView)
         private var currentItem: AppInfo? = null
@@ -42,6 +49,9 @@ class AppsAdapter(
             binding.ivMore.setOnClickListener {
                 currentItem?.let(onMoreClick)
             }
+            binding.btnQuickClone.setOnClickListener {
+                currentItem?.let(onQuickCloneClick)
+            }
         }
 
         override fun setContent(item: AppInfo, isSelected: Boolean, payload: Any?) {
@@ -50,9 +60,20 @@ class AppsAdapter(
                 setIconSafely(item.icon, item.packageName)
                 binding.name.text = item.name.ifBlank { item.packageName }
                 binding.cornerLabel.visibility = if (item.isXpModule) View.VISIBLE else View.INVISIBLE
+
+                if (showCloneBadgeAlways || item.totalClones > 1) {
+                    binding.tvCloneBadge.visibility = View.VISIBLE
+                    binding.tvCloneBadge.text = itemView.context.getString(
+                        R.string.clone_index_tag,
+                        item.cloneIndex
+                    )
+                } else {
+                    binding.tvCloneBadge.visibility = View.GONE
+                }
+
                 val isPinned = ShortcutUtil.isShortcutPinned(
                     itemView.context,
-                    userId,
+                    item.userId,
                     item.packageName
                 )
                 binding.ivPinnedBadge.visibility = if (isPinned) View.VISIBLE else View.GONE
@@ -105,6 +126,7 @@ class AppsAdapter(
             )
             binding.name.text = itemView.context.getString(R.string.app_name)
             binding.cornerLabel.visibility = View.INVISIBLE
+            binding.tvCloneBadge.visibility = View.GONE
             binding.ivPinnedBadge.visibility = View.GONE
         }
     }

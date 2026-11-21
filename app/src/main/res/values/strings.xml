@@ -136,4 +136,15 @@
     <string name="open_permission_settings">Open Permissions</string>
     <string name="shortcut_sent_toast">Pin request sent for %s — check your Home Screen</string>
     <string name="shortcut_updated_toast">Home Screen icon updated for %s</string>
+    <string name="all_clones_tab">All</string>
+    <string name="all_clones_title">All Clones</string>
+    <string name="recent_clones">Recent Clones</string>
+    <string name="all_apps_section">Cloned Apps</string>
+    <string name="quick_clone_desc">Clone another copy</string>
+    <string name="clone_index_tag">#%d</string>
+    <string name="recent_clone_subtitle">#%1$d · %2$s</string>
+    <string name="cloned_count_action">%d× · + Clone</string>
+    <string name="stop_all_clones">Stop All Clones</string>
+    <string name="stop_all_clones_done">Stopped all running cloned apps</string>
+    <string name="empty_all_title">No Cloned Apps Yet</string>
 </resources>

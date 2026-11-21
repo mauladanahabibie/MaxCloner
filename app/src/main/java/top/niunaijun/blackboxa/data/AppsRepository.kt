@@ -19,11 +19,31 @@ import top.niunaijun.blackboxa.bean.AppInfo
 import top.niunaijun.blackboxa.bean.InstallOutcome
 import top.niunaijun.blackboxa.bean.InstalledAppBean
 import top.niunaijun.blackboxa.util.MemoryManager
+import top.niunaijun.blackboxa.util.RecentClonesStore
 import top.niunaijun.blackboxa.util.ShortcutUtil
 import top.niunaijun.blackboxa.util.getString
 
 class AppsRepository {
     val TAG: String = "AppsRepository"
+
+    companion object {
+        const val ALL_USERS_ID = -1
+
+        fun resolveNextFreeUserId(
+            installedUserIdsForPkg: Set<Int>,
+            preferredUserId: Int,
+            maxExistingUserId: Int
+        ): Int {
+            if (preferredUserId >= 0 && preferredUserId !in installedUserIdsForPkg) {
+                return preferredUserId
+            }
+            var candidate = 0
+            while (candidate in installedUserIdsForPkg) {
+                candidate++
+            }
+            return candidate.coerceAtLeast(0)
+        }
+    }
 
     private data class CachedDeviceApp(
         val appInfo: AppInfo,
@@ -136,17 +156,24 @@ class AppsRepository {
                     previewInstallList()
                 }
                 val blackBoxCore = BlackBoxCore.get()
+                val users = runCatching { blackBoxCore.users }.getOrDefault(emptyList())
+
                 val newInstalledList = mDeviceApps
                     .asSequence()
                     .filter { includeSystemApps || !it.isSystem }
                     .map { cached ->
                         val app = cached.appInfo
+                        val cloneCount = users.count { user ->
+                            runCatching { blackBoxCore.isInstalled(app.packageName, user.id) }
+                                .getOrDefault(false)
+                        }
                         InstalledAppBean(
-                            app.name,
-                            app.icon,
-                            app.packageName,
-                            app.sourceDir,
-                            blackBoxCore.isInstalled(app.packageName, userID)
+                            name = app.name,
+                            icon = app.icon,
+                            packageName = app.packageName,
+                            sourceDir = app.sourceDir,
+                            isInstall = cloneCount > 0,
+                            cloneCount = cloneCount
                         )
                     }
                     .sortedBy { it.name.lowercase(Locale.getDefault()) }
@@ -162,7 +189,95 @@ class AppsRepository {
         }
     }
 
-    fun getVmInstallList(userId: Int, appsLiveData: MutableLiveData<List<AppInfo>>) {
+    private fun buildPackageUserIndexMap(blackBoxCore: BlackBoxCore): Map<String, List<Int>> {
+        val map = mutableMapOf<String, MutableList<Int>>()
+        val users = runCatching { blackBoxCore.users.sortedBy { it.id } }.getOrDefault(emptyList())
+        for (user in users) {
+            val apps = runCatching { blackBoxCore.getInstalledApplications(0, user.id) }
+                .getOrNull().orEmpty()
+            for (app in apps) {
+                val pkg = app.packageName ?: continue
+                map.getOrPut(pkg) { mutableListOf() }.add(user.id)
+            }
+        }
+        return map
+    }
+
+    fun getAllVmInstallList(
+        appsLiveData: MutableLiveData<List<AppInfo>>,
+        recentLiveData: MutableLiveData<List<AppInfo>>? = null
+    ) {
+        try {
+            if (MemoryManager.isMemoryCritical()) {
+                MemoryManager.forceGarbageCollectionIfNeeded()
+            }
+
+            val blackBoxCore = BlackBoxCore.get()
+            val users = runCatching { blackBoxCore.users.sortedBy { it.id } }.getOrDefault(emptyList())
+            val pkgUserMap = buildPackageUserIndexMap(blackBoxCore)
+
+            val rawItems = mutableListOf<AppInfo>()
+            val lookupMap = mutableMapOf<Pair<Int, String>, AppInfo>()
+
+            for (user in users) {
+                val apps = fetchAppsForUserWithRetry(blackBoxCore, user.id) ?: continue
+                for (applicationInfo in apps) {
+                    val pkg = applicationInfo.packageName
+                    if (pkg.isNullOrBlank()) continue
+                    val userIds = pkgUserMap[pkg].orEmpty()
+                    val totalClones = userIds.size.coerceAtLeast(1)
+                    val cloneIndex = (userIds.indexOf(user.id).takeIf { it >= 0 } ?: 0) + 1
+
+                    val info = AppInfo(
+                        name = safeLoadAppLabel(applicationInfo),
+                        icon = safeLoadAppIcon(applicationInfo),
+                        packageName = pkg,
+                        sourceDir = applicationInfo.sourceDir ?: "",
+                        isXpModule = false,
+                        userId = user.id,
+                        cloneIndex = cloneIndex,
+                        totalClones = totalClones
+                    )
+                    rawItems.add(info)
+                    lookupMap[user.id to pkg] = info
+                }
+            }
+
+            val groupedSorted = rawItems.sortedWith(
+                compareBy<AppInfo> { it.name.lowercase(Locale.getDefault()) }
+                    .thenBy { it.cloneIndex }
+                    .thenBy { it.userId }
+            )
+            appsLiveData.postValue(groupedSorted)
+
+            if (recentLiveData != null) {
+                val savedRecent = RecentClonesStore.getRecentEntries(App.getContext())
+                    .mapNotNull { key -> lookupMap[key] }
+                    .take(8)
+                val resolvedRecent = if (savedRecent.isNotEmpty()) {
+                    savedRecent
+                } else {
+                    rawItems.sortedByDescending { it.userId }.take(8)
+                }
+                recentLiveData.postValue(resolvedRecent)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in getAllVmInstallList: ${e.message}")
+            appsLiveData.postValue(emptyList())
+            recentLiveData?.postValue(emptyList())
+        }
+    }
+
+    fun getVmInstallList(
+        userId: Int,
+        appsLiveData: MutableLiveData<List<AppInfo>>,
+        recentLiveData: MutableLiveData<List<AppInfo>>? = null
+    ) {
+        if (userId == ALL_USERS_ID) {
+            getAllVmInstallList(appsLiveData, recentLiveData)
+            return
+        }
+
         try {
             if (MemoryManager.isMemoryCritical()) {
                 MemoryManager.forceGarbageCollectionIfNeeded()
@@ -172,30 +287,14 @@ class AppsRepository {
             val sortListData = AppManager.mRemarkSharedPreferences.getString("AppList$userId", "")
             val sortList = sortListData?.split(",")?.filter { it.isNotBlank() }
 
-            var applicationList: List<ApplicationInfo>? = null
-            var retryCount = 0
-            val maxRetries = 3
-
-            while (applicationList == null && retryCount < maxRetries) {
-                try {
-                    applicationList = blackBoxCore.getInstalledApplications(0, userId)
-                    if (applicationList == null) {
-                        retryCount++
-                        Thread.sleep(100)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "getVmInstallList attempt ${retryCount + 1}: ${e.message}")
-                    retryCount++
-                    if (retryCount < maxRetries) {
-                        Thread.sleep(200)
-                    }
-                }
-            }
-
+            val applicationList = fetchAppsForUserWithRetry(blackBoxCore, userId)
             if (applicationList == null) {
                 appsLiveData.postValue(emptyList())
+                recentLiveData?.postValue(emptyList())
                 return
             }
+
+            val pkgUserMap = buildPackageUserIndexMap(blackBoxCore)
 
             val sortedApplicationList = if (!sortList.isNullOrEmpty()) {
                 try {
@@ -211,19 +310,25 @@ class AppsRepository {
             val appInfoList = mutableListOf<AppInfo>()
             sortedApplicationList.forEachIndexed { index, applicationInfo ->
                 try {
-                    if (applicationInfo == null || applicationInfo.packageName.isNullOrBlank()) {
-                        return@forEachIndexed
-                    }
+                    val pkg = applicationInfo.packageName
+                    if (pkg.isNullOrBlank()) return@forEachIndexed
                     if (index > 0 && index % 25 == 0 && MemoryManager.isMemoryCritical()) {
                         MemoryManager.forceGarbageCollectionIfNeeded()
                     }
+                    val userIds = pkgUserMap[pkg].orEmpty()
+                    val totalClones = userIds.size.coerceAtLeast(1)
+                    val cloneIndex = (userIds.indexOf(userId).takeIf { it >= 0 } ?: 0) + 1
+
                     appInfoList.add(
                         AppInfo(
-                            safeLoadAppLabel(applicationInfo),
-                            safeLoadAppIcon(applicationInfo),
-                            applicationInfo.packageName,
-                            applicationInfo.sourceDir ?: "",
-                            false
+                            name = safeLoadAppLabel(applicationInfo),
+                            icon = safeLoadAppIcon(applicationInfo),
+                            packageName = pkg,
+                            sourceDir = applicationInfo.sourceDir ?: "",
+                            isXpModule = false,
+                            userId = userId,
+                            cloneIndex = cloneIndex,
+                            totalClones = totalClones
                         )
                     )
                 } catch (e: Exception) {
@@ -232,19 +337,48 @@ class AppsRepository {
             }
 
             appsLiveData.postValue(appInfoList)
+            recentLiveData?.postValue(emptyList())
         } catch (e: Exception) {
             Log.e(TAG, "Error in getVmInstallList: ${e.message}")
             appsLiveData.postValue(emptyList())
+            recentLiveData?.postValue(emptyList())
         }
+    }
+
+    private fun fetchAppsForUserWithRetry(
+        blackBoxCore: BlackBoxCore,
+        userId: Int
+    ): List<ApplicationInfo>? {
+        var applicationList: List<ApplicationInfo>? = null
+        var retryCount = 0
+        val maxRetries = 3
+        while (applicationList == null && retryCount < maxRetries) {
+            try {
+                applicationList = blackBoxCore.getInstalledApplications(0, userId)
+                if (applicationList == null) {
+                    retryCount++
+                    Thread.sleep(100)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchAppsForUserWithRetry($userId) attempt ${retryCount + 1}: ${e.message}")
+                retryCount++
+                if (retryCount < maxRetries) {
+                    Thread.sleep(200)
+                }
+            }
+        }
+        return applicationList
     }
 
     fun installApk(
         source: String,
-        userId: Int,
+        requestedUserId: Int,
         outcomeLiveData: MutableLiveData<InstallOutcome?>
     ) {
         try {
             val isUriSource = URLUtil.isContentUrl(source) || URLUtil.isValidUrl(source)
+            val blackBoxCore = BlackBoxCore.get()
+
             if (!isUriSource &&
                 (source.contains("blackbox") ||
                     source.contains("niunaijun") ||
@@ -262,7 +396,7 @@ class AppsRepository {
                                 InstallOutcome(
                                     success = false,
                                     message = getString(R.string.install_fail, hostPackageName),
-                                    userId = userId,
+                                    userId = requestedUserId,
                                     isInstallAction = true
                                 )
                             )
@@ -274,21 +408,47 @@ class AppsRepository {
                 }
             }
 
-            val blackBoxCore = BlackBoxCore.get()
-            val installResult = if (isUriSource) {
-                blackBoxCore.installPackageAsUser(Uri.parse(source), userId)
+            val preKnownPkg: String? = when {
+                isUriSource -> null
+                !source.contains("/") -> source
+                else -> runCatching {
+                    val file = File(source)
+                    if (file.exists()) {
+                        BlackBoxCore.getPackageManager().getPackageArchiveInfo(source, 0)?.packageName
+                    } else {
+                        null
+                    }
+                }.getOrNull()
+            }
+
+            val existingUsers = runCatching { blackBoxCore.users }.getOrDefault(emptyList())
+            val maxExistingUserId = existingUsers.maxOfOrNull { it.id } ?: -1
+
+            val targetUserId = if (preKnownPkg != null) {
+                val installedForPkg = existingUsers
+                    .filter { runCatching { blackBoxCore.isInstalled(preKnownPkg, it.id) }.getOrDefault(false) }
+                    .map { it.id }
+                    .toSet()
+                resolveNextFreeUserId(installedForPkg, requestedUserId, maxExistingUserId)
             } else {
-                blackBoxCore.installPackageAsUser(source, userId)
+                if (requestedUserId >= 0) requestedUserId else (maxExistingUserId + 1).coerceAtLeast(0)
+            }
+
+            val installResult = if (isUriSource) {
+                blackBoxCore.installPackageAsUser(Uri.parse(source), targetUserId)
+            } else {
+                blackBoxCore.installPackageAsUser(source, targetUserId)
             }
 
             if (installResult.success) {
-                updateAppSortList(userId, installResult.packageName, true)
+                updateAppSortList(targetUserId, installResult.packageName, true)
+                RecentClonesStore.recordClone(App.getContext(), targetUserId, installResult.packageName)
                 outcomeLiveData.postValue(
                     InstallOutcome(
                         success = true,
                         message = getString(R.string.install_success),
                         packageName = installResult.packageName,
-                        userId = userId,
+                        userId = targetUserId,
                         isInstallAction = true
                     )
                 )
@@ -298,7 +458,7 @@ class AppsRepository {
                     InstallOutcome(
                         success = false,
                         message = getString(R.string.install_fail, errorDetail),
-                        userId = userId,
+                        userId = targetUserId,
                         isInstallAction = true
                     )
                 )
@@ -310,7 +470,7 @@ class AppsRepository {
                 InstallOutcome(
                     success = false,
                     message = getString(R.string.install_fail, e.message ?: "unknown"),
-                    userId = userId,
+                    userId = requestedUserId.coerceAtLeast(0),
                     isInstallAction = true
                 )
             )
@@ -325,6 +485,7 @@ class AppsRepository {
         try {
             BlackBoxCore.get().uninstallPackageAsUser(packageName, userID)
             ShortcutUtil.disableShortcut(App.getContext(), userID, packageName)
+            RecentClonesStore.removeClone(App.getContext(), userID, packageName)
             updateAppSortList(userID, packageName, false)
             scanUser()
             outcomeLiveData.postValue(

@@ -136,4 +136,15 @@
     <string name="open_permission_settings">Buka Pengaturan Izin</string>
     <string name="shortcut_sent_toast">Permintaan ikon %s dikirim — cek Home Screen Anda</string>
     <string name="shortcut_updated_toast">Ikon Home Screen %s diperbarui</string>
+    <string name="all_clones_tab">Semua</string>
+    <string name="all_clones_title">Semua Clone</string>
+    <string name="recent_clones">Baru Di-clone</string>
+    <string name="all_apps_section">Semua Aplikasi Clone</string>
+    <string name="quick_clone_desc">Clone salinan baru</string>
+    <string name="clone_index_tag">#%d</string>
+    <string name="recent_clone_subtitle">#%1$d · %2$s</string>
+    <string name="cloned_count_action">%d× · + Clone</string>
+    <string name="stop_all_clones">Hentikan Semua Clone</string>
+    <string name="stop_all_clones_done">Semua aplikasi clone yang berjalan dihentikan</string>
+    <string name="empty_all_title">Belum Ada Aplikasi Clone</string>
 </resources>

@@ -27,8 +27,8 @@ class ListAdapter : RVHolderFactory() {
             binding.name.text = item.name
             binding.packageName.text = item.packageName
 
-            if (item.isInstall) {
-                binding.tvStatusBadge.setText(R.string.cloned_badge)
+            if (item.cloneCount > 0) {
+                binding.tvStatusBadge.text = ctx.getString(R.string.cloned_count_action, item.cloneCount)
                 binding.tvStatusBadge.setBackgroundResource(R.drawable.bg_pill_success)
                 binding.tvStatusBadge.setTextColor(
                     ContextCompat.getColor(ctx, R.color.mc_on_success_container)
