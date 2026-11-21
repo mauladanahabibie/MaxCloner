@@ -22,6 +22,8 @@
 .cxx
 local.properties
 /app/release/
+/maxcloner-logo/
+*.apk
 
 ## Signing credentials - never commit these
 keystore.properties

@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto">
-
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <item
-            android:id="@+id/main_setting"
-            android:title="@string/setting"
-            app:showAsAction="never" />
+        android:id="@+id/main_search"
+        android:icon="@drawable/ic_search"
+        android:title="@string/action_search"
+        app:showAsAction="always" />
+
+    <item
+        android:id="@+id/main_setting"
+        android:icon="@drawable/ic_settings"
+        android:title="@string/setting"
+        app:showAsAction="always" />
 
     <item
         android:id="@+id/fake_location"
@@ -14,12 +20,18 @@
         app:showAsAction="never" />
 
     <item
-            android:id="@+id/main_git"
-            android:title="@string/open_source_path"
-            app:showAsAction="never" />
+        android:id="@+id/main_gms"
+        android:title="@string/gms_manager"
+        app:showAsAction="never" />
 
     <item
-            android:id="@+id/main_tg"
-            android:title="@string/tg_group"
-            app:showAsAction="never" />
+        android:id="@+id/rename_space"
+        android:title="@string/rename_space"
+        app:showAsAction="never" />
+
+    <item
+        android:id="@+id/stop_all_space"
+        android:title="@string/stop_all_in_space"
+        app:showAsAction="never" />
+
 </menu>

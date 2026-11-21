@@ -1,70 +1,60 @@
 package top.niunaijun.blackboxa.view.apps
 
-import android.graphics.Point
 import android.os.Bundle
-import android.text.TextUtils
 import android.util.Log
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
-import androidx.appcompat.widget.PopupMenu
+import androidx.core.content.ContextCompat
 import androidx.core.os.bundleOf
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import cbfg.rvadapter.RVAdapter
-import com.afollestad.materialdialogs.MaterialDialog
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackboxa.R
+import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.bean.AppInfo
 import top.niunaijun.blackboxa.databinding.FragmentAppsBinding
+import top.niunaijun.blackboxa.databinding.SheetAppActionsBinding
+import top.niunaijun.blackboxa.util.ContextUtil.openAppSystemSettings
 import top.niunaijun.blackboxa.util.InjectionUtil
 import top.niunaijun.blackboxa.util.ShortcutUtil
 import top.niunaijun.blackboxa.util.inflate
-import top.niunaijun.blackboxa.util.MemoryManager
 import top.niunaijun.blackboxa.util.toast
 import top.niunaijun.blackboxa.view.base.LoadingActivity
 import top.niunaijun.blackboxa.view.main.MainActivity
-import java.util.*
-import kotlin.math.abs
-
-
 
 class AppsFragment : Fragment() {
 
-    var userID: Int = 0
+    val userID: Int
+        get() = arguments?.getInt("userID", 0) ?: 0
 
     private lateinit var viewModel: AppsViewModel
-
     private lateinit var mAdapter: RVAdapter<AppInfo>
-
     private val viewBinding: FragmentAppsBinding by inflate()
 
-    private var popupMenu: PopupMenu? = null
+    private var fullAppList: List<AppInfo> = emptyList()
+    private var currentSearchQuery: String = ""
+    private var pendingInstallSource: String? = null
 
     companion object {
         private const val TAG = "AppsFragment"
-        
-        fun newInstance(userID:Int): AppsFragment {
-            val fragment = AppsFragment()
-            val bundle = bundleOf("userID" to userID)
-            fragment.arguments = bundle
-            return fragment
+
+        fun newInstance(userID: Int): AppsFragment {
+            return AppsFragment().apply {
+                arguments = bundleOf("userID" to userID)
+            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        try {
-            super.onCreate(savedInstanceState)
-            viewModel =
-                ViewModelProvider(this, InjectionUtil.getAppsFactory()).get(AppsViewModel::class.java)
-            userID = requireArguments().getInt("userID", 0)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in onCreate: ${e.message}")
-        }
+        super.onCreate(savedInstanceState)
+        viewModel = ViewModelProvider(this, InjectionUtil.getAppsFactory())[AppsViewModel::class.java]
     }
 
     override fun onCreateView(
@@ -72,447 +62,344 @@ class AppsFragment : Fragment() {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
-        try {
-            viewBinding.stateView.showEmpty()
+        mAdapter = RVAdapter<AppInfo>(
+            requireContext(),
+            AppsAdapter(userID) { app -> showAppActionsSheet(app) }
+        ).bind(viewBinding.recyclerView)
 
-            mAdapter =
-                RVAdapter<AppInfo>(requireContext(), AppsAdapter()).bind(viewBinding.recyclerView)
-
-            viewBinding.recyclerView.adapter = mAdapter
-            
-            
-            val layoutManager = GridLayoutManager(requireContext(), 4)
-            layoutManager.isItemPrefetchEnabled = true
-            layoutManager.initialPrefetchItemCount = 8
-            viewBinding.recyclerView.layoutManager = layoutManager
-            
-            
-            viewBinding.recyclerView.setItemViewCacheSize(20)
-            viewBinding.recyclerView.setHasFixedSize(true)
-            
-            
-            viewBinding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
-                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
-                    try {
-                        super.onScrollStateChanged(recyclerView, newState)
-                        when (newState) {
-                            RecyclerView.SCROLL_STATE_IDLE -> {
-                                
-                                MemoryManager.optimizeMemoryForRecyclerView()
-                            }
-                            RecyclerView.SCROLL_STATE_DRAGGING -> {
-                                
-                                
-                            }
-                            RecyclerView.SCROLL_STATE_SETTLING -> {
-                                
-                                
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error in scroll state change: ${e.message}")
-                    }
-                }
-                
-                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                    try {
-                        super.onScrolled(recyclerView, dx, dy)
-                        
-                        if (Math.abs(dy) > 100) {
-                            
-                            
-                            
-                            if (MemoryManager.isMemoryCritical()) {
-                                Log.w(TAG, "Memory critical during fast scrolling, forcing GC")
-                                MemoryManager.forceGarbageCollectionIfNeeded()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error in scroll: ${e.message}")
-                    }
-                }
-            })
-
-            val touchCallBack = AppsTouchCallBack { from, to ->
-                try {
-                    onItemMove(from, to)
-                    viewModel.updateSortLiveData.postValue(true)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in touch callback: ${e.message}")
-                }
-            }
-
-            val itemTouchHelper = ItemTouchHelper(touchCallBack)
-            itemTouchHelper.attachToRecyclerView(viewBinding.recyclerView)
-
-            mAdapter.setItemClickListener { _, data, _ ->
-                try {
-                    showLoading()
-                    viewModel.launchApk(data.packageName, userID)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error launching app: ${e.message}")
-                    hideLoading()
-                }
-            }
-
-            interceptTouch()
-            setOnLongClick()
-            return viewBinding.root
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in onCreateView: ${e.message}")
-            
-            return View(requireContext())
+        val layoutManager = GridLayoutManager(requireContext(), 3).apply {
+            isItemPrefetchEnabled = true
+            initialPrefetchItemCount = 9
         }
+        viewBinding.recyclerView.layoutManager = layoutManager
+        viewBinding.recyclerView.adapter = mAdapter
+        viewBinding.recyclerView.setItemViewCacheSize(20)
+
+        viewBinding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                super.onScrolled(recyclerView, dx, dy)
+                if (dy > 12) {
+                    (activity as? MainActivity)?.showFloatButton(false)
+                } else if (dy < -12) {
+                    (activity as? MainActivity)?.showFloatButton(true)
+                }
+            }
+        })
+
+        mAdapter.setItemClickListener { _, data, _ ->
+            launchApp(data)
+        }
+        mAdapter.setItemLongClickListener { _, data, _ ->
+            showAppActionsSheet(data)
+        }
+
+        viewBinding.btnCloneFirst.setOnClickListener {
+            (activity as? MainActivity)?.openAppChooserForCurrentSpace()
+        }
+
+        return viewBinding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        try {
-            super.onViewCreated(view, savedInstanceState)
-            initData()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in onViewCreated: ${e.message}")
+        super.onViewCreated(view, savedInstanceState)
+        initData()
+        pendingInstallSource?.let { source ->
+            pendingInstallSource = null
+            installApk(source)
         }
     }
 
     override fun onStart() {
+        super.onStart()
         try {
-            super.onStart()
-            
-            
-            try {
-                BlackBoxCore.get().addServiceAvailableCallback {
-                    Log.d(TAG, "Services became available, refreshing app list")
-                    
+            BlackBoxCore.get().addServiceAvailableCallback {
+                if (isAdded) {
                     viewModel.getInstalledAppsWithRetry(userID)
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error registering service available callback: ${e.message}")
             }
-            
-            viewModel.getInstalledAppsWithRetry(userID)
         } catch (e: Exception) {
-            Log.e(TAG, "Error in onStart: ${e.message}")
+            Log.e(TAG, "Error registering service available callback: ${e.message}")
+        }
+        viewModel.getInstalledAppsWithRetry(userID)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (this::mAdapter.isInitialized) {
+            mAdapter.notifyDataSetChanged()
         }
     }
 
-    
-    private fun interceptTouch() {
-        try {
-            val point = Point()
-            var isScrolling = false
-            var scrollStartTime = 0L
-            
-            viewBinding.recyclerView.setOnTouchListener { _, e ->
-                try {
-                    when (e.action) {
-                        MotionEvent.ACTION_DOWN -> {
-                            
-                            isScrolling = false
-                            scrollStartTime = System.currentTimeMillis()
-                            point.set(0, 0)
-                        }
-                        
-                        MotionEvent.ACTION_UP -> {
-                            val scrollDuration = System.currentTimeMillis() - scrollStartTime
-                            
-                            
-                            if (!isScrolling && !isMove(point, e) && scrollDuration < 500) {
-                                try {
-                                    popupMenu?.show()
-                                } catch (e: Exception) {
-                                    Log.e(TAG, "Error showing popup menu: ${e.message}")
-                                }
-                            }
-                            
-                            popupMenu = null
-                            point.set(0, 0)
-                            isScrolling = false
-                        }
+    fun getAppCount(): Int = fullAppList.size
 
-                        MotionEvent.ACTION_MOVE -> {
-                            if (point.x == 0 && point.y == 0) {
-                                point.x = e.rawX.toInt()
-                                point.y = e.rawY.toInt()
-                            }
-                            
-                            
-                            if (isMove(point, e)) {
-                                isScrolling = true
-                                popupMenu?.dismiss()
-                            }
-                            
-                            
-                            isDownAndUp(point, e)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in touch listener: ${e.message}")
-                }
-                return@setOnTouchListener false
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in interceptTouch: ${e.message}")
+    fun setSearchQuery(query: String) {
+        currentSearchQuery = query.trim()
+        if (this::mAdapter.isInitialized && view != null) {
+            applyFilterAndUpdateUi()
         }
     }
 
-    private fun isMove(point: Point, e: MotionEvent): Boolean {
-        return try {
-            val max = 40
+    private fun initData() {
+        viewBinding.loadingIndicator.visibility = View.VISIBLE
+        viewModel.getInstalledApps(userID)
 
-            val x = point.x
-            val y = point.y
-
-            val xU = abs(x - e.rawX)
-            val yU = abs(y - e.rawY)
-            xU > max || yU > max
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in isMove: ${e.message}")
-            false
-        }
-    }
-
-    private fun isDownAndUp(point: Point, e: MotionEvent) {
-        try {
-            val min = 10
-            val y = point.y
-            val yU = y - e.rawY
-
-            if (abs(yU) > min) {
-                try {
-                    (requireActivity() as? MainActivity)?.showFloatButton(yU < 0)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error showing/hiding float button: ${e.message}")
-                }
+        viewModel.appsLiveData.observe(viewLifecycleOwner) { apps ->
+            viewBinding.loadingIndicator.visibility = View.GONE
+            if (apps != null) {
+                fullAppList = apps
+                applyFilterAndUpdateUi()
+                (activity as? MainActivity)?.refreshSpaceChips()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in isDownAndUp: ${e.message}")
         }
-    }
 
-    private fun onItemMove(fromPosition: Int, toPosition: Int) {
-        try {
-            
-            val items = mAdapter.getItems()
-            if (fromPosition < 0 || toPosition < 0 || 
-                fromPosition >= items.size || toPosition >= items.size) {
-                Log.w(TAG, "Invalid positions for move: from=$fromPosition, to=$toPosition, size=${items.size}")
-                return
-            }
-            
-            if (fromPosition < toPosition) {
-                for (i in fromPosition until toPosition) {
-                    try {
-                        Collections.swap(items, i, i + 1)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error swapping items at position $i: ${e.message}")
-                        return
-                    }
-                }
+        viewModel.outcomeLiveData.observe(viewLifecycleOwner) { outcome ->
+            if (outcome == null) return@observe
+            viewModel.outcomeLiveData.value = null
+            hideLoading()
+
+            viewModel.getInstalledApps(userID)
+            (activity as? MainActivity)?.scanUser()
+
+            if (outcome.success && outcome.isInstallAction && outcome.packageName != null) {
+                handleSuccessfulClone(outcome.packageName)
             } else {
-                for (i in fromPosition downTo toPosition + 1) {
-                    try {
-                        Collections.swap(items, i, i - 1)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error swapping items at position $i: ${e.message}")
-                        return
-                    }
-                }
+                showStatusSnackbar(outcome.message)
             }
-            
-            try {
-                mAdapter.notifyItemMoved(fromPosition, toPosition)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error notifying item moved: ${e.message}")
-                
+        }
+
+        viewModel.launchLiveData.observe(viewLifecycleOwner) { success ->
+            if (success == null) return@observe
+            viewModel.launchLiveData.value = null
+            hideLoading()
+            if (!success) {
+                toast(R.string.start_fail)
+            }
+        }
+    }
+
+    private fun handleSuccessfulClone(packageName: String) {
+        val ctx = context ?: return
+        val appInfo = ShortcutUtil.loadClonedAppInfo(ctx, packageName, userID)
+        if (appInfo == null) {
+            showStatusSnackbar(getString(R.string.install_success))
+            return
+        }
+
+        if (AppManager.mBlackBoxLoader.autoPinShortcut()) {
+            val result = ShortcutUtil.requestAutoPinShortcut(ctx, userID, appInfo)
+            if (this::mAdapter.isInitialized) {
                 mAdapter.notifyDataSetChanged()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in onItemMove: ${e.message}")
+            when (result) {
+                ShortcutUtil.PinResult.PERMISSION_REQUIRED,
+                ShortcutUtil.PinResult.UNSUPPORTED -> {
+                    ShortcutUtil.showShortcutPermissionDialog(ctx)
+                }
+                ShortcutUtil.PinResult.REQUESTED,
+                ShortcutUtil.PinResult.UPDATED -> {
+                    showStatusSnackbar(
+                        message = getString(R.string.cloned_ready_msg, appInfo.name),
+                        actionLabel = getString(R.string.open_now)
+                    ) {
+                        launchApp(appInfo)
+                    }
+                }
+            }
+        } else {
+            showStatusSnackbar(
+                message = getString(R.string.cloned_ready_msg, appInfo.name),
+                actionLabel = getString(R.string.add_to_home_screen)
+            ) {
+                when (ShortcutUtil.requestAutoPinShortcut(ctx, userID, appInfo)) {
+                    ShortcutUtil.PinResult.PERMISSION_REQUIRED,
+                    ShortcutUtil.PinResult.UNSUPPORTED -> ShortcutUtil.showShortcutPermissionDialog(ctx)
+                    ShortcutUtil.PinResult.REQUESTED -> toast(getString(R.string.shortcut_sent_toast, appInfo.name))
+                    ShortcutUtil.PinResult.UPDATED -> toast(getString(R.string.shortcut_updated_toast, appInfo.name))
+                }
+            }
         }
     }
 
-    private fun setOnLongClick() {
-        try {
-            mAdapter.setItemLongClickListener { view, data, _ ->
-                try {
-                    popupMenu = PopupMenu(requireContext(),view).also {
-                        it.inflate(R.menu.app_menu)
-                        it.setOnMenuItemClickListener { item ->
-                            try {
-                                when (item.itemId) {
-                                    R.id.app_remove -> {
-                                        if (data.isXpModule) {
-                                            toast(R.string.uninstall_module_toast)
-                                        } else {
-                                            unInstallApk(data)
-                                        }
-                                    }
-
-                                    R.id.app_clear -> {
-                                        clearApk(data)
-                                    }
-
-                                    R.id.app_stop -> {
-                                        stopApk(data)
-                                    }
-
-                                    R.id.app_shortcut -> {
-                                        ShortcutUtil.createShortcut(requireContext(), userID, data)
-                                    }
-                                }
-                                return@setOnMenuItemClickListener true
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error in menu item click: ${e.message}")
-                                return@setOnMenuItemClickListener false
-                            }
-                        }
-                        it.show()
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error in long click: ${e.message}")
-                }
+    private fun applyFilterAndUpdateUi() {
+        val filtered = if (currentSearchQuery.isBlank()) {
+            fullAppList
+        } else {
+            fullAppList.filter {
+                it.name.contains(currentSearchQuery, ignoreCase = true) ||
+                    it.packageName.contains(currentSearchQuery, ignoreCase = true)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in setOnLongClick: ${e.message}")
         }
-    }
-    
-    private fun initData() {
-        try {
-            viewBinding.stateView.showLoading()
-            viewModel.getInstalledApps(userID)
-            viewModel.appsLiveData.observe(viewLifecycleOwner) {
-                try {
-                    if (it != null) {
-                        mAdapter.setItems(it)
-                        if (it.isEmpty()) {
-                            viewBinding.stateView.showEmpty()
-                        } else {
-                            viewBinding.stateView.showContent()
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error observing apps data: ${e.message}")
-                }
-            }
 
-            viewModel.resultLiveData.observe(viewLifecycleOwner) {
-                try {
-                    if (!TextUtils.isEmpty(it)) {
-                        hideLoading()
-                        requireContext().toast(it)
-                        viewModel.getInstalledApps(userID)
-                        scanUser()
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error observing result data: ${e.message}")
-                }
-            }
+        mAdapter.setItems(filtered)
 
-            viewModel.launchLiveData.observe(viewLifecycleOwner) {
-                try {
-                    it?.run {
-                        hideLoading()
-                        if (!it) {
-                            toast(R.string.start_fail)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error observing launch data: ${e.message}")
-                }
+        when {
+            fullAppList.isEmpty() -> {
+                viewBinding.recyclerView.visibility = View.GONE
+                viewBinding.emptySearchContainer.visibility = View.GONE
+                viewBinding.emptyStateContainer.visibility = View.VISIBLE
+                viewBinding.tvEmptyTitle.text = getString(
+                    R.string.empty_space_title,
+                    AppManager.getSpaceDisplayName(userID)
+                )
             }
-
-            viewModel.updateSortLiveData.observe(viewLifecycleOwner) {
-                try {
-                    if (this::mAdapter.isInitialized) {
-                        viewModel.updateApkOrder(userID, mAdapter.getItems())
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error observing sort data: ${e.message}")
-                }
+            filtered.isEmpty() -> {
+                viewBinding.recyclerView.visibility = View.GONE
+                viewBinding.emptyStateContainer.visibility = View.GONE
+                viewBinding.emptySearchContainer.visibility = View.VISIBLE
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in initData: ${e.message}")
+            else -> {
+                viewBinding.emptyStateContainer.visibility = View.GONE
+                viewBinding.emptySearchContainer.visibility = View.GONE
+                viewBinding.recyclerView.visibility = View.VISIBLE
+            }
         }
     }
 
-    override fun onStop() {
+    private fun showAppActionsSheet(info: AppInfo) {
+        val ctx = context ?: return
+        val dialog = BottomSheetDialog(ctx)
+        val sheetBinding = SheetAppActionsBinding.inflate(layoutInflater)
+        dialog.setContentView(sheetBinding.root)
+
+        sheetBinding.ivSheetIcon.setImageDrawable(
+            info.icon ?: ContextCompat.getDrawable(ctx, R.drawable.ic_brand_logo)
+        )
+        sheetBinding.tvSheetAppName.text = info.name
+        sheetBinding.tvSheetPackage.text = info.packageName
+        sheetBinding.tvSheetSpace.text = AppManager.getSpaceDisplayName(userID)
+
+        val isPinned = ShortcutUtil.isShortcutPinned(ctx, userID, info.packageName)
+        if (isPinned) {
+            sheetBinding.tvSheetPinStatus.text = getString(R.string.shortcut_already_on_home)
+            sheetBinding.tvSheetPinStatus.setBackgroundResource(R.drawable.bg_pill_success)
+            sheetBinding.tvSheetPinStatus.setTextColor(
+                ContextCompat.getColor(ctx, R.color.mc_on_success_container)
+            )
+            sheetBinding.tvAddHomeTitle.text = getString(R.string.add_another_home_icon)
+        } else {
+            sheetBinding.tvSheetPinStatus.text = getString(R.string.shortcut_not_on_home)
+            sheetBinding.tvSheetPinStatus.setBackgroundResource(R.drawable.bg_pill_muted)
+            sheetBinding.tvSheetPinStatus.setTextColor(
+                ContextCompat.getColor(ctx, R.color.mc_text_secondary)
+            )
+            sheetBinding.tvAddHomeTitle.text = getString(R.string.add_to_home_screen)
+        }
+
+        val nextUserId = (activity as? MainActivity)?.getNextCloneTargetUserId(info.packageName)
+            ?: (userID + 1)
+        sheetBinding.tvCloneNextSubtitle.text = getString(
+            R.string.clone_to_next_space_subtitle,
+            AppManager.getSpaceDisplayName(nextUserId)
+        )
+
+        sheetBinding.actionAddHome.setOnClickListener {
+            dialog.dismiss()
+            ShortcutUtil.showCustomizeShortcutDialog(ctx, userID, info) { result ->
+                when (result) {
+                    ShortcutUtil.PinResult.PERMISSION_REQUIRED,
+                    ShortcutUtil.PinResult.UNSUPPORTED -> ShortcutUtil.showShortcutPermissionDialog(ctx)
+                    ShortcutUtil.PinResult.REQUESTED -> {
+                        showStatusSnackbar(getString(R.string.shortcut_sent_toast, info.name))
+                    }
+                    ShortcutUtil.PinResult.UPDATED -> {
+                        showStatusSnackbar(getString(R.string.shortcut_updated_toast, info.name))
+                    }
+                }
+                if (this::mAdapter.isInitialized) {
+                    mAdapter.notifyDataSetChanged()
+                }
+            }
+        }
+
+        sheetBinding.actionOpen.setOnClickListener {
+            dialog.dismiss()
+            launchApp(info)
+        }
+
+        sheetBinding.actionCloneNextSpace.setOnClickListener {
+            dialog.dismiss()
+            (activity as? MainActivity)?.clonePackageToNextSpace(info.packageName)
+        }
+
+        sheetBinding.actionStop.setOnClickListener {
+            dialog.dismiss()
+            stopApk(info)
+        }
+
+        sheetBinding.actionClear.setOnClickListener {
+            dialog.dismiss()
+            clearApk(info)
+        }
+
+        sheetBinding.actionRemove.setOnClickListener {
+            dialog.dismiss()
+            if (info.isXpModule) {
+                toast(R.string.uninstall_module_toast)
+            } else {
+                unInstallApk(info)
+            }
+        }
+
+        dialog.show()
+    }
+
+    private fun launchApp(info: AppInfo) {
         try {
-            super.onStop()
-            viewModel.resultLiveData.value = null
-            viewModel.launchLiveData.value = null
+            showLoading(getString(R.string.opening_app_progress, info.name))
+            viewModel.launchApk(info.packageName, userID)
         } catch (e: Exception) {
-            Log.e(TAG, "Error in onStop: ${e.message}")
+            Log.e(TAG, "Error launching app: ${e.message}")
+            hideLoading()
         }
     }
 
     private fun unInstallApk(info: AppInfo) {
-        try {
-            MaterialDialog(requireContext()).show {
-                title(R.string.uninstall_app)
-                message(text = getString(R.string.uninstall_app_hint, info.name))
-                positiveButton(R.string.done) {
-                    try {
-                        showLoading()
-                        viewModel.unInstall(info.packageName, userID)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error uninstalling app: ${e.message}")
-                        hideLoading()
-                    }
-                }
-                negativeButton(R.string.cancel)
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.uninstall_app)
+            .setMessage(getString(R.string.uninstall_app_hint, info.name))
+            .setPositiveButton(R.string.app_remove) { _, _ ->
+                showLoading(getString(R.string.removing_clone_progress))
+                viewModel.unInstall(info.packageName, userID)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing uninstall dialog: ${e.message}")
-        }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
-    
     private fun stopApk(info: AppInfo) {
-        try {
-            MaterialDialog(requireContext()).show {
-                title(R.string.app_stop)
-                message(text = getString(R.string.app_stop_hint,info.name))
-                positiveButton(R.string.done) {
-                    try {
-                        BlackBoxCore.get().stopPackage(info.packageName, userID)
-                        toast(getString(R.string.is_stop,info.name))
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error stopping app: ${e.message}")
-                    }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.app_stop)
+            .setMessage(getString(R.string.app_stop_hint, info.name))
+            .setPositiveButton(R.string.app_stop) { _, _ ->
+                try {
+                    BlackBoxCore.get().stopPackage(info.packageName, userID)
+                    showStatusSnackbar(getString(R.string.is_stop, info.name))
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error stopping app: ${e.message}")
                 }
-                negativeButton(R.string.cancel)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing stop dialog: ${e.message}")
-        }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
-    
     private fun clearApk(info: AppInfo) {
-        try {
-            MaterialDialog(requireContext()).show {
-                title(R.string.app_clear)
-                message(text = getString(R.string.app_clear_hint,info.name))
-                positiveButton(R.string.done) {
-                    try {
-                        showLoading()
-                        viewModel.clearApkData(info.packageName, userID)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error clearing app data: ${e.message}")
-                        hideLoading()
-                    }
-                }
-                negativeButton(R.string.cancel)
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle(R.string.app_clear)
+            .setMessage(getString(R.string.app_clear_hint, info.name))
+            .setPositiveButton(R.string.app_clear) { _, _ ->
+                showLoading(getString(R.string.clearing_data_progress))
+                viewModel.clearApkData(info.packageName, userID)
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing clear dialog: ${e.message}")
-        }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     fun installApk(source: String) {
+        if (!this::viewModel.isInitialized) {
+            pendingInstallSource = source
+            return
+        }
         try {
-            showLoading()
+            showLoading(getString(R.string.cloning_app_progress))
             viewModel.install(source, userID)
         } catch (e: Exception) {
             Log.e(TAG, "Error installing APK: ${e.message}")
@@ -520,31 +407,28 @@ class AppsFragment : Fragment() {
         }
     }
 
-    private fun scanUser() {
-        try {
-            (requireActivity() as? MainActivity)?.scanUser()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error scanning user: ${e.message}")
+    private fun showStatusSnackbar(
+        message: String,
+        actionLabel: String? = null,
+        action: (() -> Unit)? = null
+    ) {
+        val anchorHost = activity?.findViewById<View>(android.R.id.content) ?: return
+        val ctx = context ?: return
+        val snackbar = Snackbar.make(anchorHost, message, Snackbar.LENGTH_LONG)
+            .setBackgroundTint(ContextCompat.getColor(ctx, R.color.mc_surface_card_elevated))
+            .setTextColor(ContextCompat.getColor(ctx, R.color.mc_text_primary))
+        if (actionLabel != null && action != null) {
+            snackbar.setActionTextColor(ContextCompat.getColor(ctx, R.color.mc_primary))
+            snackbar.setAction(actionLabel) { action() }
         }
+        snackbar.show()
     }
 
-    private fun showLoading() {
-        try {
-            if(requireActivity() is LoadingActivity){
-                (requireActivity() as LoadingActivity).showLoading()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing loading: ${e.message}")
-        }
+    private fun showLoading(message: String? = null) {
+        (activity as? LoadingActivity)?.showLoading(message)
     }
 
     private fun hideLoading() {
-        try {
-            if(requireActivity() is LoadingActivity){
-                (requireActivity() as LoadingActivity).hideLoading()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error hiding loading: ${e.message}")
-        }
+        (activity as? LoadingActivity)?.hideLoading()
     }
 }

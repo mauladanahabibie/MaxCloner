@@ -4,15 +4,20 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.recyclerview.widget.LinearLayoutManager
 import cbfg.rvadapter.RVAdapter
-import com.ferfalk.simplesearchview.SimpleSearchView
 import top.niunaijun.blackboxa.R
+import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.bean.InstalledAppBean
 import top.niunaijun.blackboxa.databinding.ActivityListBinding
 import top.niunaijun.blackboxa.util.InjectionUtil
@@ -22,136 +27,136 @@ import top.niunaijun.blackboxa.view.base.BaseActivity
 class ListActivity : BaseActivity() {
 
     private val viewBinding: ActivityListBinding by inflate()
-
     private lateinit var mAdapter: RVAdapter<InstalledAppBean>
-
     private lateinit var viewModel: ListViewModel
 
-    private var appList: List<InstalledAppBean> = ArrayList()
+    private var appList: List<InstalledAppBean> = emptyList()
+    private var includeSystemApps = false
+    private var userId = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(viewBinding.root)
+        setupEdgeToEdge(viewBinding.headerContainer, viewBinding.recyclerView)
 
-        initToolbar(viewBinding.toolbarLayout.toolbar, R.string.installed_app, true)
+        userId = intent.getIntExtra("userID", 0)
+        initToolbar(viewBinding.toolbarLayout.toolbar, R.string.choose_app, true)
+        viewBinding.toolbarLayout.toolbar.subtitle = AppManager.getSpaceDisplayName(userId)
 
-        mAdapter =
-                RVAdapter<InstalledAppBean>(this, ListAdapter())
-                        .bind(viewBinding.recyclerView)
-                        .setItemClickListener { _, item, _ -> finishWithResult(item.packageName) }
+        mAdapter = RVAdapter<InstalledAppBean>(this, ListAdapter())
+            .bind(viewBinding.recyclerView)
+            .setItemClickListener { _, item, _ -> finishWithResult(item.packageName) }
 
         viewBinding.recyclerView.layoutManager = LinearLayoutManager(this)
 
-        initSearchView()
+        initControls()
         initViewModel()
     }
 
-    private fun initSearchView() {
-        viewBinding.searchView.setOnQueryTextListener(
-                object : SimpleSearchView.OnQueryTextListener {
-                    override fun onQueryTextChange(newText: String): Boolean {
-                        filterApp(newText)
-                        return true
-                    }
+    private fun initControls() {
+        viewBinding.etSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString().orEmpty()
+                viewBinding.btnClearSearch.visibility =
+                    if (query.isEmpty()) View.GONE else View.VISIBLE
+                filterApp(query)
+            }
 
-                    override fun onQueryTextCleared(): Boolean {
-                        return true
-                    }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
 
-                    override fun onQueryTextSubmit(query: String): Boolean {
-                        return true
-                    }
-                }
-        )
+        viewBinding.btnClearSearch.setOnClickListener {
+            viewBinding.etSearch.setText("")
+        }
+
+        viewBinding.switchAutoPin.isChecked = AppManager.mBlackBoxLoader.autoPinShortcut()
+        viewBinding.switchAutoPin.setOnCheckedChangeListener { _, isChecked ->
+            AppManager.mBlackBoxLoader.invalidAutoPinShortcut(isChecked)
+        }
+
+        viewBinding.chipShowSystem.setOnCheckedChangeListener { _, isChecked ->
+            includeSystemApps = isChecked
+            viewModel.getInstallAppList(userId, includeSystemApps)
+        }
     }
 
     private fun initViewModel() {
-        viewModel =
-                ViewModelProvider(this, InjectionUtil.getListFactory())
-                        .get(ListViewModel::class.java)
-        val userID = intent.getIntExtra("userID", 0)
-        viewModel.getInstallAppList(userID)
-        viewBinding.toolbarLayout.toolbar.setTitle(R.string.installed_app)
+        viewModel = ViewModelProvider(this, InjectionUtil.getListFactory())[ListViewModel::class.java]
+        viewModel.getInstallAppList(userId, includeSystemApps)
 
-        viewModel.loadingLiveData.observe(this) {
-            if (it) {
-                viewBinding.stateView.showLoading()
-            } else {
-                viewBinding.stateView.showContent()
-            }
+        viewModel.loadingLiveData.observe(this) { loading ->
+            viewBinding.loadingIndicator.visibility = if (loading) View.VISIBLE else View.GONE
         }
 
-        viewModel.appsLiveData.observe(this) {
-            if (it != null) {
-                this.appList = it
-                viewBinding.searchView.setQuery("", false)
-                filterApp("")
-                if (it.isNotEmpty()) {
-                    viewBinding.stateView.showContent()
-                    viewModel.previewInstalledList()
-                } else {
-                    viewBinding.stateView.showEmpty()
-                }
+        viewModel.appsLiveData.observe(this) { apps ->
+            if (apps != null) {
+                appList = apps
+                filterApp(viewBinding.etSearch.text?.toString().orEmpty())
             }
         }
     }
 
-    private fun filterApp(newText: String) {
-        val newList =
-                this.appList.filter {
-                    it.name.contains(newText, true) or it.packageName.contains(newText, true)
-                }
-        mAdapter.setItems(newList)
+    private fun filterApp(query: String) {
+        val trimmed = query.trim()
+        val filtered = if (trimmed.isEmpty()) {
+            appList
+        } else {
+            appList.filter {
+                it.name.contains(trimmed, ignoreCase = true) ||
+                    it.packageName.contains(trimmed, ignoreCase = true)
+            }
+        }
+        mAdapter.setItems(filtered)
+
+        val isLoading = viewBinding.loadingIndicator.visibility == View.VISIBLE
+        if (filtered.isEmpty() && !isLoading) {
+            viewBinding.emptySearchContainer.visibility = View.VISIBLE
+            viewBinding.recyclerView.visibility = View.GONE
+        } else {
+            viewBinding.emptySearchContainer.visibility = View.GONE
+            viewBinding.recyclerView.visibility = View.VISIBLE
+        }
     }
 
     private val openDocumentedResult =
-            registerForActivityResult(ActivityResultContracts.GetContent()) {
-                it?.run { finishWithResult(it.toString()) }
-            }
+        registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri?.let { finishWithResult(it.toString()) }
+        }
 
     private fun finishWithResult(source: String) {
         intent.putExtra("source", source)
+        intent.putExtra("userID", userId)
         setResult(Activity.RESULT_OK, intent)
-        val imm: InputMethodManager = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
-        window.peekDecorView()?.run { imm.hideSoftInputFromWindow(windowToken, 0) }
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        window.peekDecorView()?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
         finish()
     }
 
-    override fun onBackPressed() {
-        if (viewBinding.searchView.isSearchOpen) {
-            viewBinding.searchView.closeSearch()
-        } else {
-            super.onBackPressed()
-        }
-    }
-
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        if (item.itemId == R.id.list_choose) {
-            openDocumentedResult.launch("application/vnd.android.package-archive")
+        return when (item.itemId) {
+            R.id.list_choose -> {
+                openDocumentedResult.launch("application/vnd.android.package-archive")
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
         }
-        return true
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         menuInflater.inflate(R.menu.menu_list, menu)
-        val item = menu!!.findItem(R.id.list_search)
-        viewBinding.searchView.setMenuItem(item)
-
+        val tintColor = ContextCompat.getColor(this, R.color.mc_text_primary)
+        menu?.findItem(R.id.list_choose)?.icon?.let { drawable ->
+            val wrapped = DrawableCompat.wrap(drawable.mutate())
+            DrawableCompat.setTint(wrapped, tintColor)
+            menu.findItem(R.id.list_choose).icon = wrapped
+        }
         return true
-    }
-
-    override fun onStop() {
-        super.onStop()
-        viewModel.loadingLiveData.postValue(true)
-        viewModel.loadingLiveData.removeObservers(this)
-        viewModel.appsLiveData.postValue(null)
-        viewModel.appsLiveData.removeObservers(this)
     }
 
     companion object {
         fun start(context: Context) {
-            val intent = Intent(context, ListActivity::class.java)
-            context.startActivity(intent)
+            context.startActivity(Intent(context, ListActivity::class.java))
         }
     }
 }

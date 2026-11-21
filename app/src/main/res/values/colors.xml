@@ -1,61 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <!--
-      Zenith OS palette.
-      Obsidian base tuned for OLED, neon cyan as "signal", electric purple as
-      "processing". See MAXCLONER.md for the design system this comes from.
-    -->
+    <!-- MaxCloner Brand Palette (derived from maxcloner-logo) -->
+    <color name="mc_brand_blue">#2563EB</color>
+    <color name="mc_brand_green">#22C55E</color>
 
-    <!-- Base surfaces -->
-    <color name="zenith_obsidian">#0A0C10</color>
-    <color name="zenith_surface">#111318</color>
-    <color name="zenith_surface_container_lowest">#0C0E12</color>
-    <color name="zenith_surface_container_low">#1A1C20</color>
-    <color name="zenith_surface_container">#1E2024</color>
-    <color name="zenith_surface_container_high">#282A2E</color>
-    <color name="zenith_surface_container_highest">#333539</color>
+    <!-- Modern Clean Dark Surfaces (Slate family matching #0F172A logo ink) -->
+    <color name="mc_bg">#0B1120</color>
+    <color name="mc_surface">#0F172A</color>
+    <color name="mc_surface_card">#162032</color>
+    <color name="mc_surface_card_elevated">#1E293B</color>
+    <color name="mc_surface_sheet">#131C2E</color>
+    <color name="mc_outline">#273549</color>
+    <color name="mc_outline_subtle">#1E293B</color>
 
-    <!-- Glass layers: 60% opacity over the obsidian base -->
-    <color name="zenith_glass">#99161B22</color>
-    <color name="zenith_glass_strong">#CC161B22</color>
+    <!-- Primary & Secondary Accents -->
+    <color name="mc_primary">#3B82F6</color>
+    <color name="mc_on_primary">#FFFFFF</color>
+    <color name="mc_primary_container">#172554</color>
+    <color name="mc_on_primary_container">#BFDBFE</color>
 
-    <!-- Signal (cyan) -->
-    <color name="zenith_cyan">#00F2FF</color>
-    <color name="zenith_cyan_dim">#00DBE7</color>
-    <color name="zenith_cyan_bright">#74F5FF</color>
-    <color name="zenith_on_cyan">#00363A</color>
-    <color name="zenith_cyan_glow">#3300F2FF</color>
-    <color name="zenith_cyan_rim">#5900F2FF</color>
-    <color name="zenith_cyan_grid">#0D00F2FF</color>
+    <color name="mc_secondary">#22C55E</color>
+    <color name="mc_on_secondary">#052E16</color>
+    <color name="mc_secondary_container">#0B2A1A</color>
+    <color name="mc_on_secondary_container">#86EFAC</color>
 
-    <!-- Processing (purple) -->
-    <color name="zenith_purple">#8B5CF6</color>
-    <color name="zenith_purple_light">#D0BCFF</color>
-    <color name="zenith_on_purple">#3C0091</color>
-    <color name="zenith_purple_glow">#338B5CF6</color>
+    <!-- Semantic Status -->
+    <color name="mc_success">#22C55E</color>
+    <color name="mc_success_container">#0B2A1A</color>
+    <color name="mc_on_success_container">#86EFAC</color>
 
-    <!-- Text -->
-    <color name="zenith_on_surface">#E2E2E8</color>
-    <color name="zenith_on_surface_variant">#B9CACB</color>
-    <color name="zenith_outline">#849495</color>
-    <color name="zenith_outline_variant">#3A494B</color>
+    <color name="mc_warning">#FBBF24</color>
+    <color name="mc_warning_container">#33270F</color>
+    <color name="mc_on_warning_container">#FDE68A</color>
 
-    <!-- Alert -->
-    <color name="zenith_danger">#FF2D55</color>
-    <color name="zenith_on_danger">#690005</color>
+    <color name="mc_danger">#F87171</color>
+    <color name="mc_danger_container">#36191D</color>
+    <color name="mc_on_danger">#450A0A</color>
 
-    <!--
-      Legacy aliases. Layouts inherited from upstream still reference these
-      names; remapping them onto the Zenith palette avoids touching every
-      layout at once.
-    -->
-    <color name="primary">@color/zenith_surface</color>
-    <color name="primary_dark">@color/zenith_obsidian</color>
-    <color name="primary_light">@color/zenith_surface_container_high</color>
-    <color name="accent">@color/zenith_cyan</color>
-    <color name="primary_text">@color/zenith_on_surface</color>
-    <color name="secondary_text">@color/zenith_on_surface_variant</color>
+    <!-- Text Hierarchy -->
+    <color name="mc_text_primary">#F8FAFC</color>
+    <color name="mc_text_secondary">#94A3B8</color>
+    <color name="mc_text_muted">#64748B</color>
+
+    <!-- Ripple & Highlight Overlays -->
+    <color name="mc_ripple">#1F3B82F6</color>
+    <color name="mc_action_highlight_border">#2563EB</color>
+
+    <!-- Legacy Zenith & Upstream Aliases -->
+    <color name="zenith_obsidian">@color/mc_bg</color>
+    <color name="zenith_surface">@color/mc_surface</color>
+    <color name="zenith_surface_container_lowest">@color/mc_bg</color>
+    <color name="zenith_surface_container_low">@color/mc_surface</color>
+    <color name="zenith_surface_container">@color/mc_surface_card</color>
+    <color name="zenith_surface_container_high">@color/mc_surface_card_elevated</color>
+    <color name="zenith_surface_container_highest">#334155</color>
+    <color name="zenith_glass">@color/mc_surface_card</color>
+    <color name="zenith_glass_strong">@color/mc_surface_sheet</color>
+    <color name="zenith_cyan">@color/mc_primary</color>
+    <color name="zenith_cyan_dim">@color/mc_brand_blue</color>
+    <color name="zenith_cyan_bright">@color/mc_on_primary_container</color>
+    <color name="zenith_on_cyan">@color/mc_on_primary</color>
+    <color name="zenith_cyan_glow">#262563EB</color>
+    <color name="zenith_cyan_rim">@color/mc_outline</color>
+    <color name="zenith_cyan_grid">#0D3B82F6</color>
+    <color name="zenith_purple">@color/mc_secondary</color>
+    <color name="zenith_purple_light">@color/mc_on_secondary_container</color>
+    <color name="zenith_on_purple">@color/mc_on_secondary</color>
+    <color name="zenith_purple_glow">#1A22C55E</color>
+    <color name="zenith_on_surface">@color/mc_text_primary</color>
+    <color name="zenith_on_surface_variant">@color/mc_text_secondary</color>
+    <color name="zenith_outline">@color/mc_outline</color>
+    <color name="zenith_outline_variant">@color/mc_outline_subtle</color>
+    <color name="zenith_danger">@color/mc_danger</color>
+    <color name="zenith_on_danger">@color/mc_on_danger</color>
+
+    <color name="primary">@color/mc_surface</color>
+    <color name="primary_dark">@color/mc_bg</color>
+    <color name="primary_light">@color/mc_surface_card_elevated</color>
+    <color name="accent">@color/mc_primary</color>
+    <color name="primary_text">@color/mc_text_primary</color>
+    <color name="secondary_text">@color/mc_text_secondary</color>
     <color name="white">#FFFFFFFF</color>
 
 </resources>

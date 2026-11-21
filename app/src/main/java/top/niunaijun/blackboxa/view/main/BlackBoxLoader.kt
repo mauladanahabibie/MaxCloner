@@ -12,18 +12,31 @@ import top.niunaijun.blackboxa.app.App
 import top.niunaijun.blackboxa.app.rocker.RockerManager
 import top.niunaijun.blackboxa.biz.cache.AppSharedPreferenceDelegate
 
-
 class BlackBoxLoader {
 
     private var mHideRoot by AppSharedPreferenceDelegate(App.getContext(), false)
-
     private var mDaemonEnable by AppSharedPreferenceDelegate(App.getContext(), false)
     private var mShowShortcutPermissionDialog by AppSharedPreferenceDelegate(App.getContext(), true)
-
-    
+    private var mAutoPinShortcut by AppSharedPreferenceDelegate(App.getContext(), true)
     private var mUseVpnNetwork by AppSharedPreferenceDelegate(App.getContext(), false)
-
     private var mDisableFlagSecure by AppSharedPreferenceDelegate(App.getContext(), false)
+
+    fun autoPinShortcut(): Boolean {
+        return try {
+            mAutoPinShortcut
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting autoPinShortcut: ${e.message}")
+            true
+        }
+    }
+
+    fun invalidAutoPinShortcut(enable: Boolean) {
+        try {
+            this.mAutoPinShortcut = enable
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting autoPinShortcut: ${e.message}")
+        }
+    }
 
     fun hideRoot(): Boolean {
         return try {
@@ -122,99 +135,77 @@ class BlackBoxLoader {
     fun addLifecycleCallback() {
         try {
             BlackBoxCore.get()
-                    .addAppLifecycleCallback(
-                            object : AppLifecycleCallback() {
-                                override fun beforeCreateApplication(
-                                        packageName: String?,
-                                        processName: String?,
-                                        context: Context?,
-                                        userId: Int
-                                ) {
-                                    try {
-                                        Log.d(
-                                                TAG,
-                                                "beforeCreateApplication: pkg $packageName, processName $processName,userID:${BActivityThread.getUserId()}"
-                                        )
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error in beforeCreateApplication: ${e.message}")
-                                    }
-                                }
-
-                                override fun beforeApplicationOnCreate(
-                                        packageName: String?,
-                                        processName: String?,
-                                        application: Application?,
-                                        userId: Int
-                                ) {
-                                    try {
-                                        Log.d(
-                                                TAG,
-                                                "beforeApplicationOnCreate: pkg $packageName, processName $processName"
-                                        )
-                                    } catch (e: Exception) {
-                                        Log.e(
-                                                TAG,
-                                                "Error in beforeApplicationOnCreate: ${e.message}"
-                                        )
-                                    }
-                                }
-
-                                override fun afterApplicationOnCreate(
-                                        packageName: String?,
-                                        processName: String?,
-                                        application: Application?,
-                                        userId: Int
-                                ) {
-                                    try {
-                                        Log.d(
-                                                TAG,
-                                                "afterApplicationOnCreate: pkg $packageName, processName $processName"
-                                        )
-                                        RockerManager.init(application, userId)
-                                    } catch (e: Exception) {
-                                        Log.e(
-                                                TAG,
-                                                "Error in afterApplicationOnCreate: ${e.message}"
-                                        )
-                                    }
-                                }
-
-                                override fun onStoragePermissionNeeded(
-                                        packageName: String?,
-                                        userId: Int
-                                ): Boolean {
-                                    try {
-                                        Log.w(
-                                                TAG,
-                                                "Storage permission needed for launching: $packageName"
-                                        )
-                                        
-                                        
-                                        
-                                        val intent =
-                                                android.content.Intent(
-                                                        "top.niunaijun.blackboxa.REQUEST_STORAGE_PERMISSION"
-                                                )
-                                        intent.putExtra("package_name", packageName)
-                                        intent.putExtra("user_id", userId)
-                                        intent.setPackage(App.getContext().packageName)
-                                        App.getContext().sendBroadcast(intent)
-                                        
-                                        
-                                        
-                                        
-                                        
-                                        return false
-                                    } catch (e: Exception) {
-                                        Log.e(
-                                                TAG,
-                                                "Error in onStoragePermissionNeeded: ${e.message}"
-                                        )
-                                        return false
-                                    }
-                                }
+                .addAppLifecycleCallback(
+                    object : AppLifecycleCallback() {
+                        override fun beforeCreateApplication(
+                            packageName: String?,
+                            processName: String?,
+                            context: Context?,
+                            userId: Int
+                        ) {
+                            try {
+                                Log.d(
+                                    TAG,
+                                    "beforeCreateApplication: pkg $packageName, processName $processName,userID:${BActivityThread.getUserId()}"
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in beforeCreateApplication: ${e.message}")
                             }
-                    )
+                        }
+
+                        override fun beforeApplicationOnCreate(
+                            packageName: String?,
+                            processName: String?,
+                            application: Application?,
+                            userId: Int
+                        ) {
+                            try {
+                                Log.d(
+                                    TAG,
+                                    "beforeApplicationOnCreate: pkg $packageName, processName $processName"
+                                )
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in beforeApplicationOnCreate: ${e.message}")
+                            }
+                        }
+
+                        override fun afterApplicationOnCreate(
+                            packageName: String?,
+                            processName: String?,
+                            application: Application?,
+                            userId: Int
+                        ) {
+                            try {
+                                Log.d(
+                                    TAG,
+                                    "afterApplicationOnCreate: pkg $packageName, processName $processName"
+                                )
+                                RockerManager.init(application, userId)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in afterApplicationOnCreate: ${e.message}")
+                            }
+                        }
+
+                        override fun onStoragePermissionNeeded(
+                            packageName: String?,
+                            userId: Int
+                        ): Boolean {
+                            try {
+                                Log.w(TAG, "Storage permission needed for launching: $packageName")
+                                val intent =
+                                    android.content.Intent("top.niunaijun.blackboxa.REQUEST_STORAGE_PERMISSION")
+                                intent.putExtra("package_name", packageName)
+                                intent.putExtra("user_id", userId)
+                                intent.setPackage(App.getContext().packageName)
+                                App.getContext().sendBroadcast(intent)
+                                return false
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in onStoragePermissionNeeded: ${e.message}")
+                                return false
+                            }
+                        }
+                    }
+                )
         } catch (e: Exception) {
             Log.e(TAG, "Error adding lifecycle callback: ${e.message}")
         }
@@ -223,76 +214,69 @@ class BlackBoxLoader {
     fun attachBaseContext(context: Context) {
         try {
             BlackBoxCore.get()
-                    .doAttachBaseContext(
-                            context,
-                            object : ClientConfiguration() {
-                                override fun getHostPackageName(): String {
-                                    return try {
-                                        context.packageName
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error getting package name: ${e.message}")
-                                        "unknown"
-                                    }
-                                }
-
-                                override fun isHideRoot(): Boolean {
-                                    return try {
-                                        mHideRoot
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error checking hideRoot: ${e.message}")
-                                        false
-                                    }
-                                }
-
-                                override fun isEnableDaemonService(): Boolean {
-                                    return try {
-                                        mDaemonEnable
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error checking daemonEnable: ${e.message}")
-                                        false
-                                    }
-                                }
-
-                                override fun isUseVpnNetwork(): Boolean {
-                                    return try {
-                                        mUseVpnNetwork
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error checking useVpnNetwork: ${e.message}")
-                                        false
-                                    }
-                                }
-
-                                override fun isDisableFlagSecure(): Boolean {
-                                    return try {
-                                        mDisableFlagSecure
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error checking disableFlagSecure: ${e.message}")
-                                        false
-                                    }
-                                }
-
-                                override fun requestInstallPackage(
-                                        file: File?,
-                                        userId: Int
-                                ): Boolean {
-                                    return try {
-                                        if (file == null) {
-                                            Log.w(TAG, "requestInstallPackage: file is null")
-                                            return false
-                                        }
-                                        val packageInfo =
-                                                context.packageManager.getPackageArchiveInfo(
-                                                        file.absolutePath,
-                                                        0
-                                                )
-                                        false
-                                    } catch (e: Exception) {
-                                        Log.e(TAG, "Error in requestInstallPackage: ${e.message}")
-                                        false
-                                    }
-                                }
+                .doAttachBaseContext(
+                    context,
+                    object : ClientConfiguration() {
+                        override fun getHostPackageName(): String {
+                            return try {
+                                context.packageName
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error getting package name: ${e.message}")
+                                "unknown"
                             }
-                    )
+                        }
+
+                        override fun isHideRoot(): Boolean {
+                            return try {
+                                mHideRoot
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error checking hideRoot: ${e.message}")
+                                false
+                            }
+                        }
+
+                        override fun isEnableDaemonService(): Boolean {
+                            return try {
+                                mDaemonEnable
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error checking daemonEnable: ${e.message}")
+                                false
+                            }
+                        }
+
+                        override fun isUseVpnNetwork(): Boolean {
+                            return try {
+                                mUseVpnNetwork
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error checking useVpnNetwork: ${e.message}")
+                                false
+                            }
+                        }
+
+                        override fun isDisableFlagSecure(): Boolean {
+                            return try {
+                                mDisableFlagSecure
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error checking disableFlagSecure: ${e.message}")
+                                false
+                            }
+                        }
+
+                        override fun requestInstallPackage(file: File?, userId: Int): Boolean {
+                            return try {
+                                if (file == null) {
+                                    Log.w(TAG, "requestInstallPackage: file is null")
+                                    return false
+                                }
+                                context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+                                false
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error in requestInstallPackage: ${e.message}")
+                                false
+                            }
+                        }
+                    }
+                )
         } catch (e: Exception) {
             Log.e(TAG, "Error in attachBaseContext: ${e.message}")
         }
@@ -301,17 +285,6 @@ class BlackBoxLoader {
     fun doOnCreate(context: Context) {
         try {
             BlackBoxCore.get().doCreate()
-
-            
-            try {
-                BlackBoxCore.get().addServiceAvailableCallback {
-                    Log.d(TAG, "Services became available, triggering app list refresh")
-                    
-                    
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error registering service available callback: ${e.message}")
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in doOnCreate: ${e.message}")
         }

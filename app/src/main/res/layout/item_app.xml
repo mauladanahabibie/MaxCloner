@@ -1,52 +1,93 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-        xmlns:app="http://schemas.android.com/apk/res-auto"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:padding="5dp">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:paddingTop="12dp"
-        android:paddingBottom="8dp">
-
-    <!-- Glass tile with a cyan rim light; the icon floats inside it -->
-    <FrameLayout
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:background="@drawable/zenith_app_tile"
-            android:padding="8dp">
+        android:background="@drawable/bg_app_card"
+        android:minHeight="132dp"
+        android:paddingHorizontal="8dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="12dp">
 
         <ImageView
-                android:id="@+id/icon"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
-                android:layout_gravity="center" />
+            android:id="@+id/ivPinnedBadge"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:background="@drawable/bg_pill_success"
+            android:contentDescription="@string/shortcut_already_on_home"
+            android:padding="4dp"
+            android:src="@drawable/ic_home_pin"
+            android:visibility="gone"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/mc_success" />
 
-        <com.othershe.cornerlabelview.CornerLabelView
+        <ImageView
+            android:id="@+id/ivMore"
+            android:layout_width="28dp"
+            android:layout_height="28dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/action_more"
+            android:padding="4dp"
+            android:src="@drawable/ic_more_vert"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toTopOf="parent"
+            app:tint="@color/mc_text_secondary" />
+
+        <FrameLayout
+            android:id="@+id/iconContainer"
+            android:layout_width="56dp"
+            android:layout_height="56dp"
+            android:layout_marginTop="20dp"
+            android:background="@drawable/bg_icon_container"
+            android:padding="6dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent">
+
+            <ImageView
+                android:id="@+id/icon"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_gravity="center"
+                android:contentDescription="@null" />
+
+            <com.othershe.cornerlabelview.CornerLabelView
                 android:id="@+id/cornerLabel"
                 android:layout_width="24dp"
                 android:layout_height="24dp"
                 android:layout_gravity="top|start"
                 android:visibility="invisible"
-                app:bg_color="@color/zenith_purple"
+                app:bg_color="@color/mc_brand_blue"
                 app:position="left_top"
-                app:side_length="22dp"
+                app:side_length="20dp"
                 app:text="XP"
-                app:text_color="@color/zenith_on_surface"
+                app:text_color="@color/mc_on_primary"
                 app:text_size="8sp" />
-    </FrameLayout>
 
-    <TextView
+        </FrameLayout>
+
+        <TextView
             android:id="@+id/name"
-            android:layout_width="match_parent"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="10dp"
             android:ellipsize="end"
             android:fontFamily="@font/inter"
-            android:gravity="center"
-            android:maxLines="1"
-            android:paddingStart="2dp"
-            android:paddingEnd="2dp"
-            android:textColor="@color/zenith_on_surface"
-            android:textSize="11sp" />
+            android:gravity="center_horizontal|top"
+            android:maxLines="2"
+            android:minLines="2"
+            android:textColor="@color/mc_text_primary"
+            android:textSize="12sp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/iconContainer" />
 
-</LinearLayout>
+    </androidx.constraintlayout.widget.ConstraintLayout>
+
+</FrameLayout>

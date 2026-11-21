@@ -2,27 +2,40 @@ package top.niunaijun.blackboxa.view.main
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
+import android.provider.Settings
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.inputmethod.InputMethodManager
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import androidx.core.graphics.drawable.DrawableCompat
 import androidx.viewpager2.widget.ViewPager2
-import com.afollestad.materialdialogs.MaterialDialog
-import com.afollestad.materialdialogs.input.input
+import com.google.android.material.chip.Chip
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.android.material.snackbar.Snackbar
 import top.niunaijun.blackbox.BlackBoxCore
 import top.niunaijun.blackboxa.R
-import top.niunaijun.blackboxa.app.App
 import top.niunaijun.blackboxa.app.AppManager
 import top.niunaijun.blackboxa.databinding.ActivityMainBinding
-import top.niunaijun.blackboxa.util.Resolution
+import top.niunaijun.blackboxa.databinding.DialogRenameSpaceBinding
 import top.niunaijun.blackboxa.util.inflate
 import top.niunaijun.blackboxa.view.apps.AppsFragment
 import top.niunaijun.blackboxa.view.base.LoadingActivity
 import top.niunaijun.blackboxa.view.fake.FakeManagerActivity
+import top.niunaijun.blackboxa.view.gms.GmsManagerActivity
 import top.niunaijun.blackboxa.view.list.ListActivity
 import top.niunaijun.blackboxa.view.setting.SettingActivity
 
@@ -31,19 +44,15 @@ class MainActivity : LoadingActivity() {
     private val viewBinding: ActivityMainBinding by inflate()
 
     private lateinit var mViewPagerAdapter: ViewPagerAdapter
-
     private val fragmentList = mutableListOf<AppsFragment>()
-
     private var currentUser = 0
 
     companion object {
         private const val TAG = "MainActivity"
         private const val STORAGE_PERMISSION_REQUEST_CODE = 1001
-        private const val VPN_PERMISSION_REQUEST_CODE = 1002
 
         fun start(context: Context) {
-            val intent = Intent(context, MainActivity::class.java)
-            context.startActivity(intent)
+            context.startActivity(Intent(context, MainActivity::class.java))
         }
     }
 
@@ -51,59 +60,347 @@ class MainActivity : LoadingActivity() {
         try {
             super.onCreate(savedInstanceState)
 
-            try {
-                BlackBoxCore.get().onBeforeMainActivityOnCreate(this)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in onBeforeMainActivityOnCreate: ${e.message}")
-            }
+            runCatching { BlackBoxCore.get().onBeforeMainActivityOnCreate(this) }
 
             setContentView(viewBinding.root)
+            setupEdgeToEdge(
+                topView = viewBinding.headerContainer,
+                bottomView = viewBinding.fab,
+                applyBottomAsMargin = true
+            )
+
             initToolbar(viewBinding.toolbarLayout.toolbar, R.string.app_name)
+            viewBinding.toolbarLayout.toolbar.setContentInsetsRelative(12, 16)
+
             initViewPager()
             initFab()
-            initToolbarSubTitle()
+            initSearchBar()
+            initSpaceControls()
+            setupBackHandler()
 
-            
             checkStoragePermission()
-
-            
-            checkVpnPermission()
-
-            try {
-                BlackBoxCore.get().onAfterMainActivityOnCreate(this)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error in onAfterMainActivityOnCreate: ${e.message}")
+            if (AppManager.mBlackBoxLoader.useVpnNetwork()) {
+                checkVpnPermission()
             }
+
+            runCatching { BlackBoxCore.get().onAfterMainActivityOnCreate(this) }
         } catch (e: Exception) {
             Log.e(TAG, "Critical error in onCreate: ${e.message}")
-            
             showErrorDialog("Failed to initialize app: ${e.message}")
         }
     }
 
+    private fun setupBackHandler() {
+        onBackPressedDispatcher.addCallback(
+            this,
+            object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (viewBinding.mainSearchContainer.visibility == View.VISIBLE) {
+                        closeSearchBar()
+                    } else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            }
+        )
+    }
+
+    private fun initSearchBar() {
+        viewBinding.etMainSearch.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                val query = s?.toString().orEmpty()
+                viewBinding.btnClearMainSearch.visibility =
+                    if (query.isEmpty()) View.GONE else View.VISIBLE
+                fragmentList.firstOrNull { it.userID == currentUser }?.setSearchQuery(query)
+            }
+
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+
+        viewBinding.btnClearMainSearch.setOnClickListener {
+            viewBinding.etMainSearch.setText("")
+        }
+    }
+
+    private fun toggleSearchBar() {
+        if (viewBinding.mainSearchContainer.visibility == View.VISIBLE) {
+            closeSearchBar()
+        } else {
+            viewBinding.mainSearchContainer.visibility = View.VISIBLE
+            viewBinding.etMainSearch.requestFocus()
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+            imm.showSoftInput(viewBinding.etMainSearch, InputMethodManager.SHOW_IMPLICIT)
+        }
+    }
+
+    private fun closeSearchBar() {
+        viewBinding.etMainSearch.setText("")
+        viewBinding.mainSearchContainer.visibility = View.GONE
+        fragmentList.firstOrNull { it.userID == currentUser }?.setSearchQuery("")
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
+        window.peekDecorView()?.let { imm.hideSoftInputFromWindow(it.windowToken, 0) }
+    }
+
+    private fun initSpaceControls() {
+        updateUserRemark(currentUser)
+        rebuildSpaceChips()
+
+        viewBinding.btnRenameSpace.setOnClickListener {
+            showRenameSpaceDialog(currentUser)
+        }
+    }
+
+    private fun showRenameSpaceDialog(userId: Int) {
+        val dialogBinding = DialogRenameSpaceBinding.inflate(layoutInflater)
+        val currentName = AppManager.getSpaceDisplayName(userId)
+        dialogBinding.etSpaceName.setText(currentName)
+        dialogBinding.etSpaceName.setSelection(currentName.length)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.rename_space)
+            .setView(dialogBinding.root)
+            .setPositiveButton(R.string.done) { _, _ ->
+                val newName = dialogBinding.etSpaceName.text?.toString()?.trim().orEmpty()
+                AppManager.mRemarkSharedPreferences.edit {
+                    if (newName.isEmpty()) {
+                        remove("Remark$userId")
+                    } else {
+                        putString("Remark$userId", newName)
+                    }
+                }
+                updateUserRemark(currentUser)
+                rebuildSpaceChips()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    fun refreshSpaceChips() {
+        runOnUiThread {
+            rebuildSpaceChips()
+        }
+    }
+
+    private fun rebuildSpaceChips() {
+        if (isFinishing || isDestroyed) return
+        val users = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
+        val chipGroup = viewBinding.spaceChipGroup
+        chipGroup.removeAllViews()
+
+        fragmentList.forEachIndexed { index, fragment ->
+            val userId = fragment.userID
+            val isTrailingNewSpace = index == fragmentList.lastIndex &&
+                users.isNotEmpty() &&
+                users.none { it.id == userId }
+
+            val label = if (isTrailingNewSpace) {
+                getString(R.string.new_space)
+            } else {
+                val spaceName = AppManager.getSpaceDisplayName(userId)
+                val cachedCount = fragment.getAppCount()
+                val liveCount = if (cachedCount > 0) {
+                    cachedCount
+                } else {
+                    runCatching { BlackBoxCore.get().getInstalledApplications(0, userId).size }
+                        .getOrDefault(0)
+                }
+                if (liveCount > 0) {
+                    getString(R.string.space_chip_with_count, spaceName, liveCount)
+                } else {
+                    spaceName
+                }
+            }
+
+            val chip = Chip(this, null, com.google.android.material.R.attr.chipStyle).apply {
+                id = View.generateViewId()
+                text = label
+                isCheckable = true
+                isChecked = (userId == currentUser)
+                chipBackgroundColor = ContextCompat.getColorStateList(
+                    this@MainActivity,
+                    R.color.bg_space_chip_selector
+                )
+                chipStrokeColor = ContextCompat.getColorStateList(
+                    this@MainActivity,
+                    R.color.stroke_space_chip_selector
+                )
+                chipStrokeWidth = resources.displayMetrics.density
+                setTextColor(
+                    ContextCompat.getColorStateList(
+                        this@MainActivity,
+                        R.color.text_space_chip_selector
+                    )
+                )
+                isCheckedIconVisible = false
+                chipCornerRadius = 20f * resources.displayMetrics.density
+                setOnClickListener {
+                    if (viewBinding.viewPager.currentItem != index) {
+                        viewBinding.viewPager.setCurrentItem(index, true)
+                    } else {
+                        isChecked = true
+                    }
+                }
+            }
+            chipGroup.addView(chip)
+        }
+    }
+
+    private fun initViewPager() {
+        val userList = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
+        fragmentList.clear()
+        userList.distinctBy { it.id }.forEach { fragmentList.add(AppsFragment.newInstance(it.id)) }
+
+        val nextUserId = (userList.maxOfOrNull { it.id } ?: -1) + 1
+        if (fragmentList.none { it.userID == nextUserId }) {
+            fragmentList.add(AppsFragment.newInstance(nextUserId))
+        }
+
+        currentUser = fragmentList.firstOrNull()?.userID ?: 0
+
+        mViewPagerAdapter = ViewPagerAdapter(this)
+        mViewPagerAdapter.replaceData(fragmentList)
+        viewBinding.viewPager.adapter = mViewPagerAdapter
+        viewBinding.viewPager.registerOnPageChangeCallback(
+            object : ViewPager2.OnPageChangeCallback() {
+                override fun onPageSelected(position: Int) {
+                    super.onPageSelected(position)
+                    if (position in fragmentList.indices) {
+                        currentUser = fragmentList[position].userID
+                        updateUserRemark(currentUser)
+                        rebuildSpaceChips()
+                        showFloatButton(true)
+                        val query = viewBinding.etMainSearch.text?.toString().orEmpty()
+                        fragmentList[position].setSearchQuery(query)
+                    }
+                }
+            }
+        )
+    }
+
+    private fun initFab() {
+        viewBinding.fab.setOnClickListener {
+            openAppChooserForCurrentSpace()
+        }
+    }
+
+    fun openAppChooserForCurrentSpace() {
+        try {
+            val pos = viewBinding.viewPager.currentItem
+            val targetUserId = fragmentList.getOrNull(pos)?.userID ?: currentUser
+            val intent = Intent(this, ListActivity::class.java).apply {
+                putExtra("userID", targetUserId)
+            }
+            apkPathResult.launch(intent)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error launching ListActivity: ${e.message}")
+        }
+    }
+
+    fun getNextCloneTargetUserId(packageName: String): Int {
+        val users = runCatching { BlackBoxCore.get().users }.getOrDefault(emptyList())
+        val availableExisting = users.firstOrNull { user ->
+            user.id != currentUser && !runCatching {
+                BlackBoxCore.get().isInstalled(packageName, user.id)
+            }.getOrDefault(false)
+        }
+        return availableExisting?.id
+            ?: fragmentList.lastOrNull()?.userID
+            ?: ((users.maxOfOrNull { it.id } ?: -1) + 1)
+    }
+
+    fun clonePackageToNextSpace(packageName: String) {
+        val targetUserId = getNextCloneTargetUserId(packageName)
+        if (fragmentList.none { it.userID == targetUserId }) {
+            scanUser()
+        }
+        val targetIndex = fragmentList.indexOfFirst { it.userID == targetUserId }
+        if (targetIndex >= 0) {
+            viewBinding.viewPager.setCurrentItem(targetIndex, true)
+            fragmentList[targetIndex].installApk(packageName)
+        }
+    }
+
+    fun showFloatButton(show: Boolean) {
+        if (show) {
+            viewBinding.fab.extend()
+        } else {
+            viewBinding.fab.shrink()
+        }
+    }
+
+    fun scanUser() {
+        try {
+            val userList = BlackBoxCore.get().users
+            val nextUserId = (userList.maxOfOrNull { it.id } ?: -1) + 1
+            val expectedIds = userList.map { it.id } + listOf(nextUserId)
+
+            val existingIds = fragmentList.map { it.userID }.toSet()
+            fragmentList.removeAll { it.userID !in expectedIds }
+            expectedIds.filter { it !in existingIds }.forEach { missingId ->
+                fragmentList.add(AppsFragment.newInstance(missingId))
+            }
+            val uniqueFragments = fragmentList.distinctBy { it.userID }
+            if (uniqueFragments.size != fragmentList.size) {
+                fragmentList.clear()
+                fragmentList.addAll(uniqueFragments)
+            }
+            fragmentList.sortBy { it.userID }
+
+            if (fragmentList.isEmpty()) {
+                fragmentList.add(AppsFragment.newInstance(0))
+            }
+
+            mViewPagerAdapter.notifyDataSetChanged()
+            val pos = viewBinding.viewPager.currentItem.coerceIn(0, fragmentList.lastIndex)
+            currentUser = fragmentList[pos].userID
+            updateUserRemark(currentUser)
+            rebuildSpaceChips()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in scanUser: ${e.message}")
+        }
+    }
+
+    private fun updateUserRemark(userId: Int) {
+        viewBinding.toolbarLayout.toolbar.subtitle = null
+    }
+
+    private val apkPathResult =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            try {
+                if (result.resultCode == RESULT_OK) {
+                    result.data?.let { data ->
+                        val userId = data.getIntExtra("userID", currentUser)
+                        val source = data.getStringExtra("source")
+                        if (!source.isNullOrBlank()) {
+                            val targetFragment = fragmentList.firstOrNull { it.userID == userId }
+                                ?: fragmentList.firstOrNull()
+                            targetFragment?.installApk(source)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling APK path result: ${e.message}")
+            }
+        }
+
     private fun checkStoragePermission() {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                
-                if (!android.os.Environment.isExternalStorageManager()) {
-                    Log.w(TAG, "MANAGE_EXTERNAL_STORAGE permission not granted")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (!Environment.isExternalStorageManager()) {
                     showStoragePermissionDialog()
                 }
             } else {
-                
-                if (androidx.core.content.ContextCompat.checkSelfPermission(
-                                this,
-                                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                        ) != android.content.pm.PackageManager.PERMISSION_GRANTED ||
-                                androidx.core.content.ContextCompat.checkSelfPermission(
-                                        this,
-                                        android.Manifest.permission.READ_EXTERNAL_STORAGE
-                                ) != android.content.pm.PackageManager.PERMISSION_GRANTED
+                if (ContextCompat.checkSelfPermission(
+                        this,
+                        android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    ) != PackageManager.PERMISSION_GRANTED ||
+                    ContextCompat.checkSelfPermission(
+                        this,
+                        android.Manifest.permission.READ_EXTERNAL_STORAGE
+                    ) != PackageManager.PERMISSION_GRANTED
                 ) {
-                    Log.w(
-                            TAG,
-                            "Storage permissions not granted on Android ${android.os.Build.VERSION.SDK_INT}"
-                    )
                     requestLegacyStoragePermission()
                 }
             }
@@ -113,106 +410,51 @@ class MainActivity : LoadingActivity() {
     }
 
     private fun requestLegacyStoragePermission() {
-        try {
-            androidx.core.app.ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(
-                            android.Manifest.permission.READ_EXTERNAL_STORAGE,
-                            android.Manifest.permission.WRITE_EXTERNAL_STORAGE
-                    ),
-                    STORAGE_PERMISSION_REQUEST_CODE
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Error requesting storage permission: ${e.message}")
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-            requestCode: Int,
-            permissions: Array<out String>,
-            grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
-            if (grantResults.isNotEmpty() &&
-                            grantResults.all {
-                                it == android.content.pm.PackageManager.PERMISSION_GRANTED
-                            }
-            ) {
-                Log.d(TAG, "Storage permissions granted")
-            } else {
-                Log.w(TAG, "Storage permissions denied")
-            }
-        }
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+                android.Manifest.permission.WRITE_EXTERNAL_STORAGE
+            ),
+            STORAGE_PERMISSION_REQUEST_CODE
+        )
     }
 
     private fun showStoragePermissionDialog() {
-        try {
-            MaterialDialog(this).show {
-                title(text = "Storage Permission Required")
-                message(
-                        text =
-                                "This app needs 'All Files Access' permission to properly run sandboxed apps. Without this permission, some apps may not work correctly.\n\nPlease grant permission in the next screen."
-                )
-                positiveButton(text = "Grant Permission") { openAllFilesAccessSettings() }
-                negativeButton(text = "Later") { Log.w(TAG, "User postponed storage permission") }
-                cancelable(false)
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing storage permission dialog: ${e.message}")
-        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.storage_permission_title)
+            .setMessage(R.string.storage_permission_message)
+            .setPositiveButton(R.string.grant_permission) { _, _ -> openAllFilesAccessSettings() }
+            .setNegativeButton(R.string.later, null)
+            .setCancelable(false)
+            .show()
     }
 
     private fun openAllFilesAccessSettings() {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                val intent =
-                        Intent(
-                                android.provider.Settings
-                                        .ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION
-                        )
-                intent.data = Uri.parse("package:$packageName")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = Uri.parse("package:$packageName")
+                }
                 storagePermissionResult.launch(intent)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error opening storage settings: ${e.message}")
-            
-            try {
-                val intent =
-                        Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                storagePermissionResult.launch(intent)
-            } catch (e2: Exception) {
-                Log.e(TAG, "Error opening fallback storage settings: ${e2.message}")
+            runCatching {
+                storagePermissionResult.launch(
+                    Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                )
             }
         }
     }
 
     private val storagePermissionResult =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                try {
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                        if (android.os.Environment.isExternalStorageManager()) {
-                            Log.d(TAG, "Storage permission granted!")
-                        } else {
-                            Log.w(TAG, "Storage permission still not granted")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error handling storage permission result: ${e.message}")
-                }
-            }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
 
-    
     private fun checkVpnPermission() {
         try {
             val vpnIntent = VpnService.prepare(this)
             if (vpnIntent != null) {
-                
-                Log.d(TAG, "VPN permission not granted, requesting...")
                 vpnPermissionResult.launch(vpnIntent)
-            } else {
-                
-                Log.d(TAG, "VPN permission already granted")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error checking VPN permission: ${e.message}")
@@ -220,215 +462,80 @@ class MainActivity : LoadingActivity() {
     }
 
     private val vpnPermissionResult =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-                try {
-                    if (result.resultCode == RESULT_OK) {
-                        Log.d(TAG, "VPN permission granted!")
-                        
-                    } else {
-                        Log.w(TAG, "VPN permission denied by user")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error handling VPN permission result: ${e.message}")
-                }
-            }
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { }
 
     private fun showErrorDialog(message: String) {
-        try {
-            MaterialDialog(this).show {
-                title(text = "Error")
-                message(text = message)
-                positiveButton(text = "OK") { finish() }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error showing error dialog: ${e.message}")
-            finish()
-        }
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Error")
+            .setMessage(message)
+            .setPositiveButton(R.string.done) { _, _ -> finish() }
+            .show()
     }
-
-    private fun initToolbarSubTitle() {
-        try {
-            updateUserRemark(0)
-            
-            viewBinding.toolbarLayout.toolbar.getChildAt(1)?.setOnClickListener {
-                try {
-                    MaterialDialog(this).show {
-                        title(res = R.string.userRemark)
-                        input(
-                                hintRes = R.string.userRemark,
-                                prefill = viewBinding.toolbarLayout.toolbar.subtitle
-                        ) { _, input ->
-                            try {
-                                AppManager.mRemarkSharedPreferences.edit {
-                                    putString("Remark$currentUser", input.toString())
-                                    viewBinding.toolbarLayout.toolbar.subtitle = input
-                                }
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error saving user remark: ${e.message}")
-                            }
-                        }
-                        positiveButton(res = R.string.done)
-                        negativeButton(res = R.string.cancel)
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error showing remark dialog: ${e.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in initToolbarSubTitle: ${e.message}")
-        }
-    }
-
-    private fun initViewPager() {
-        try {
-            val userList = BlackBoxCore.get().users
-            userList.forEach { fragmentList.add(AppsFragment.newInstance(it.id)) }
-
-            currentUser = userList.firstOrNull()?.id ?: 0
-            fragmentList.add(AppsFragment.newInstance(userList.size))
-
-            mViewPagerAdapter = ViewPagerAdapter(this)
-            mViewPagerAdapter.replaceData(fragmentList)
-            viewBinding.viewPager.adapter = mViewPagerAdapter
-            viewBinding.dotsIndicator.setViewPager2(viewBinding.viewPager)
-            viewBinding.viewPager.registerOnPageChangeCallback(
-                    object : ViewPager2.OnPageChangeCallback() {
-                        override fun onPageSelected(position: Int) {
-                            try {
-                                super.onPageSelected(position)
-                                currentUser = fragmentList[position].userID
-                                updateUserRemark(currentUser)
-                                showFloatButton(true)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Error in onPageSelected: ${e.message}")
-                            }
-                        }
-                    }
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in initViewPager: ${e.message}")
-        }
-    }
-
-    private fun initFab() {
-        try {
-            viewBinding.fab.setOnClickListener {
-                try {
-                    val userId = viewBinding.viewPager.currentItem
-                    val intent = Intent(this, ListActivity::class.java)
-                    intent.putExtra("userID", userId)
-                    apkPathResult.launch(intent)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error launching ListActivity: ${e.message}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in initFab: ${e.message}")
-        }
-    }
-
-    fun showFloatButton(show: Boolean) {
-        try {
-            val tranY: Float = Resolution.convertDpToPixel(120F, App.getContext())
-            val time = 200L
-            if (show) {
-                viewBinding.fab.animate().translationY(0f).alpha(1f).setDuration(time).start()
-            } else {
-                viewBinding.fab.animate().translationY(tranY).alpha(0f).setDuration(time).start()
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in showFloatButton: ${e.message}")
-        }
-    }
-
-    fun scanUser() {
-        try {
-            val userList = BlackBoxCore.get().users
-
-            if (fragmentList.size == userList.size) {
-                fragmentList.add(AppsFragment.newInstance(fragmentList.size))
-            } else if (fragmentList.size > userList.size + 1) {
-                fragmentList.removeLast()
-            }
-
-            mViewPagerAdapter.notifyDataSetChanged()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error in scanUser: ${e.message}")
-        }
-    }
-
-    private fun updateUserRemark(userId: Int) {
-        try {
-            var remark =
-                    AppManager.mRemarkSharedPreferences.getString("Remark$userId", "User $userId")
-            if (remark.isNullOrEmpty()) {
-                remark = "User $userId"
-            }
-
-            viewBinding.toolbarLayout.toolbar.subtitle = remark
-        } catch (e: Exception) {
-            Log.e(TAG, "Error updating user remark: ${e.message}")
-            viewBinding.toolbarLayout.toolbar.subtitle = "User $userId"
-        }
-    }
-
-    private val apkPathResult =
-            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-                try {
-                    if (it.resultCode == RESULT_OK) {
-                        it.data?.let { data ->
-                            val userId = data.getIntExtra("userID", 0)
-                            val source = data.getStringExtra("source")
-                            if (source != null) {
-                                fragmentList[userId].installApk(source)
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error handling APK path result: ${e.message}")
-                }
-            }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        try {
-            menuInflater.inflate(R.menu.menu_main, menu)
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error creating options menu: ${e.message}")
-            return false
+        menuInflater.inflate(R.menu.menu_main, menu)
+        val iconTint = ContextCompat.getColor(this, R.color.mc_text_primary)
+        menu?.let {
+            for (i in 0 until it.size()) {
+                it.getItem(i).icon?.let { drawable ->
+                    val wrapped = DrawableCompat.wrap(drawable.mutate())
+                    DrawableCompat.setTint(wrapped, iconTint)
+                    it.getItem(i).icon = wrapped
+                }
+            }
         }
+        return true
     }
 
     override fun onOptionsItemSelected(item: MenuItem): Boolean {
-        try {
-            when (item.itemId) {
-                R.id.main_git -> {
-                    val intent =
-                            Intent(
-                                    Intent.ACTION_VIEW,
-                                    Uri.parse("https://github.com/ALEX5402/NewBlackbox")
-                            )
-                    startActivity(intent)
-                }
-                R.id.main_setting -> {
-                    SettingActivity.start(this)
-                }
-                R.id.main_tg -> {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/newblackboxa"))
-                    startActivity(intent)
-                }
-                R.id.fake_location -> {
-                    
-                    val intent = Intent(this, FakeManagerActivity::class.java)
-                    intent.putExtra("userID", 0)
-                    startActivity(intent)
-                }
+        return when (item.itemId) {
+            R.id.main_search -> {
+                toggleSearchBar()
+                true
             }
+            R.id.main_setting -> {
+                SettingActivity.start(this)
+                true
+            }
+            R.id.fake_location -> {
+                val intent = Intent(this, FakeManagerActivity::class.java).apply {
+                    putExtra("userID", currentUser)
+                }
+                startActivity(intent)
+                true
+            }
+            R.id.main_gms -> {
+                GmsManagerActivity.start(this)
+                true
+            }
+            R.id.rename_space -> {
+                showRenameSpaceDialog(currentUser)
+                true
+            }
+            R.id.stop_all_space -> {
+                stopAllAppsInCurrentSpace()
+                true
+            }
+            else -> super.onOptionsItemSelected(item)
+        }
+    }
 
-            return true
+    private fun stopAllAppsInCurrentSpace() {
+        try {
+            val apps = BlackBoxCore.get().getInstalledApplications(0, currentUser)
+            apps.forEach { app ->
+                runCatching { BlackBoxCore.get().stopPackage(app.packageName, currentUser) }
+            }
+            Snackbar.make(
+                findViewById(android.R.id.content),
+                getString(R.string.stop_all_done, AppManager.getSpaceDisplayName(currentUser)),
+                Snackbar.LENGTH_SHORT
+            )
+                .setBackgroundTint(ContextCompat.getColor(this, R.color.mc_surface_card_elevated))
+                .setTextColor(ContextCompat.getColor(this, R.color.mc_text_primary))
+                .show()
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling menu item selection: ${e.message}")
-            return false
+            Log.e(TAG, "Error stopping all apps in space $currentUser: ${e.message}")
         }
     }
 }

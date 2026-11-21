@@ -15,18 +15,16 @@ class SettingActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(viewBinding.root)
+        setupEdgeToEdge(viewBinding.headerContainer, viewBinding.fragment)
         initToolbar(viewBinding.toolbarLayout.toolbar, R.string.setting, true)
         supportFragmentManager.beginTransaction()
-                .replace(R.id.fragment, SettingFragment())
-                .commit()
+            .replace(R.id.fragment, SettingFragment())
+            .commit()
     }
 
-    companion object{
-        fun start(context: Context){
-            val intent = Intent(context,SettingActivity::class.java)
-            intent.action = Intent.ACTION_OPEN_DOCUMENT
-            context.startActivity(intent)
+    companion object {
+        fun start(context: Context) {
+            context.startActivity(Intent(context, SettingActivity::class.java))
         }
     }
-
 }

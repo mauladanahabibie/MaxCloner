@@ -1,21 +1,22 @@
 package top.niunaijun.blackboxa.view.apps
 
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.lifecycle.MutableLiveData
 import top.niunaijun.blackboxa.bean.AppInfo
+import top.niunaijun.blackboxa.bean.InstallOutcome
 import top.niunaijun.blackboxa.data.AppsRepository
 import top.niunaijun.blackboxa.view.base.BaseViewModel
-import android.util.Log
-
 
 class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
 
     val appsLiveData = MutableLiveData<List<AppInfo>>()
 
-    val resultLiveData = MutableLiveData<String>()
+    val outcomeLiveData = MutableLiveData<InstallOutcome?>()
 
-    val launchLiveData = MutableLiveData<Boolean>()
+    val launchLiveData = MutableLiveData<Boolean?>()
 
-    
     val updateSortLiveData = MutableLiveData<Boolean>()
 
     fun getInstalledApps(userId: Int) {
@@ -23,47 +24,42 @@ class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
             repo.getVmInstallList(userId, appsLiveData)
         }
     }
-    
-    
+
     fun getInstalledAppsWithRetry(userId: Int, maxRetries: Int = 3) {
         var retryCount = 0
-        
+
         fun attemptLoad() {
             launchOnUI {
                 repo.getVmInstallList(userId, appsLiveData)
-                
-                
                 val currentApps = appsLiveData.value
                 if ((currentApps == null || currentApps.isEmpty()) && retryCount < maxRetries) {
                     retryCount++
-                    Log.d("AppsViewModel", "No apps loaded, retrying... (${retryCount}/${maxRetries})")
-                    
-                    
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    Log.d("AppsViewModel", "No apps loaded, retrying... ($retryCount/$maxRetries)")
+                    Handler(Looper.getMainLooper()).postDelayed({
                         attemptLoad()
-                    }, 1000) 
+                    }, 1000)
                 }
             }
         }
-        
+
         attemptLoad()
     }
 
     fun install(source: String, userID: Int) {
         launchOnUI {
-            repo.installApk(source, userID, resultLiveData)
+            repo.installApk(source, userID, outcomeLiveData)
         }
     }
 
     fun unInstall(packageName: String, userID: Int) {
         launchOnUI {
-            repo.unInstall(packageName, userID, resultLiveData)
+            repo.unInstall(packageName, userID, outcomeLiveData)
         }
     }
 
-    fun clearApkData(packageName: String,userID: Int){
+    fun clearApkData(packageName: String, userID: Int) {
         launchOnUI {
-            repo.clearApkData(packageName,userID,resultLiveData)
+            repo.clearApkData(packageName, userID, outcomeLiveData)
         }
     }
 
@@ -73,9 +69,9 @@ class AppsViewModel(private val repo: AppsRepository) : BaseViewModel() {
         }
     }
 
-    fun updateApkOrder(userID: Int,dataList:List<AppInfo>){
+    fun updateApkOrder(userID: Int, dataList: List<AppInfo>) {
         launchOnUI {
-            repo.updateApkOrder(userID,dataList)
+            repo.updateApkOrder(userID, dataList)
         }
     }
 }
